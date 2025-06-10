@@ -24,6 +24,23 @@ lazy val network = (project in file("."))
     name := "network",
   )
 
+lazy val proxy = (project in file("proxy"))
+  .aggregate(
+    reverseProxy,
+  )
+  .settings(commonSettings)
+  .settings(
+    name := "proxy",
+  )
+
+lazy val reverseProxy = (project in file("proxy/reverse"))
+  .aggregate(
+
+  )
+  .settings(commonSettings)
+  .settings(
+    name := "reverse-proxy",
+  )
 
 lazy val socks = (project in file("socks"))
   .aggregate(
