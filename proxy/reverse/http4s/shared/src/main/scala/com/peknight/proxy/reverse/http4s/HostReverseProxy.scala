@@ -15,6 +15,7 @@ trait HostReverseProxy:
   def port: Option[Port] = None
   def proxyPort: Option[Port] = None
   def scheme: Option[Uri.Scheme] = None
+  def wsScheme: Option[Uri.Scheme] = None
   def proxyScheme: Option[Uri.Scheme] = None
   def overwriteReferrer: Boolean = false
   def requestUriF: PartialFunction[Uri, Uri] =
@@ -31,5 +32,5 @@ trait HostReverseProxy:
                                webSocketBuilder: WebSocketBuilder[F],
                                forwardedBy: Option[Forwarded.Node] = None
                              ): HttpRoutes[F] =
-    ReverseProxy.uri[F](clientR, wsClientR, webSocketBuilder, proxyScheme, forwardedBy, overwriteReferrer)(requestUriF)(responseUriF)
+    ReverseProxy.uri[F](clientR, wsClientR, webSocketBuilder, proxyScheme, wsScheme, forwardedBy, overwriteReferrer)(requestUriF)(responseUriF)
 end HostReverseProxy

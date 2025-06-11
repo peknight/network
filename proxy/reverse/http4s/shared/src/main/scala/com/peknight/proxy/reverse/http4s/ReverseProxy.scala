@@ -3,6 +3,7 @@ package com.peknight.proxy.reverse.http4s
 import cats.Monad
 import cats.effect.{Concurrent, Resource}
 import cats.syntax.applicative.*
+import cats.syntax.applicativeError.*
 import cats.syntax.eq.*
 import cats.syntax.flatMap.*
 import cats.syntax.functor.*
@@ -12,6 +13,7 @@ import com.comcast.ip4s.{Ipv4Address, Ipv6Address, Port}
 import com.peknight.fs2.ext.pipe.scanS
 import com.peknight.http4s.ext.syntax.uri.withAuthority
 import com.peknight.http4s.ext.uri.host.fromString
+import com.peknight.http4s.ext.uri.scheme.{ws, wss}
 import fs2.{Pipe, Stream}
 import org.http4s.client.Client
 import org.http4s.client.websocket.{WSClient, WSConnection, WSFrame, WSRequest}
@@ -28,10 +30,11 @@ trait ReverseProxy:
                              wsClientR: Resource[F, WSClient[F]],
                              webSocketBuilder: WebSocketBuilder[F],
                              scheme: Option[Uri.Scheme] = None,
+                             wsScheme: Option[Uri.Scheme] = None,
                              forwardedBy: Option[Forwarded.Node] = None,
                              overwriteReferrer: Boolean = false
                            )(f: PartialFunction[Uri, Uri])(g: PartialFunction[Uri, Uri]): HttpRoutes[F] =
-    apply[F](clientR, wsClientR, webSocketBuilder, req => f.isDefinedAt(getOriginUri(req)), scheme, forwardedBy,
+    apply[F](clientR, wsClientR, webSocketBuilder, req => f.isDefinedAt(getOriginUri(req)), scheme, wsScheme, forwardedBy,
       req => f(getOriginUri(req)).pure[F],
       (uri, req) => uri.host.map(host => Host(host.value, uri.authority.flatMap(_.port))).pure[F],
       (uri, req) =>
@@ -50,6 +53,7 @@ trait ReverseProxy:
                                webSocketBuilder: WebSocketBuilder[F],
                                isDefinedAt: Request[F] => Boolean,
                                scheme: Option[Uri.Scheme],
+                               wsScheme: Option[Uri.Scheme],
                                forwardedBy: Option[Forwarded.Node],
                                uriF: Request[F] => F[Uri],
                                hostF: (Uri, Request[F]) => F[Option[Host]],
@@ -64,8 +68,16 @@ trait ReverseProxy:
         request <- handleRequest(req, scheme, forwardedBy, uriF, hostF, referrerF, requestF)
         response <-
           if req.headers.get[Upgrade].exists(_.values.exists(_.name === ci"websocket")) then
-            val wsRequest = WSRequest(request.uri, request.headers, request.method)
-            wsClientR.flatMap(_.connect(wsRequest)).allocated.flatMap{ (connection, release) =>
+            val scheme = wsScheme.orElse(request.uri.scheme.flatMap {
+              case scheme if scheme === Uri.Scheme.http => ws.some
+              case scheme if scheme === Uri.Scheme.https => wss.some
+              case _ => None
+            }).getOrElse(ws)
+            val wsRequest = WSRequest(request.uri.copy(scheme = Some(scheme)), request.headers, request.method)
+            wsClientR.flatMap(_.connect(wsRequest)).allocated.attempt.map { either =>
+              println(either)
+              either
+            }.rethrow.flatMap{ (connection, release) =>
               for
                 resp <- webSocketBuilder.build(webSocketFramePipe(connection))
                 response <- handleResponse(resp, release, contentLocationF, locationF, responseF)
