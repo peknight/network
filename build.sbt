@@ -1,6 +1,6 @@
 ThisBuild / version := "0.1.0-SNAPSHOT"
 
-ThisBuild / scalaVersion := "3.7.0"
+ThisBuild / scalaVersion := "3.7.1"
 
 ThisBuild / organization := "com.peknight"
 
@@ -18,6 +18,7 @@ lazy val commonSettings = Seq(
 lazy val network = (project in file("."))
   .aggregate(
     socks,
+    proxy,
   )
   .settings(commonSettings)
   .settings(
@@ -35,11 +36,24 @@ lazy val proxy = (project in file("proxy"))
 
 lazy val reverseProxy = (project in file("proxy/reverse"))
   .aggregate(
-
+    reverseProxyHttp4s.jvm,
+    reverseProxyHttp4s.js,
   )
   .settings(commonSettings)
   .settings(
     name := "reverse-proxy",
+  )
+
+lazy val reverseProxyHttp4s = (crossProject(JSPlatform, JVMPlatform) in file("proxy/reverse/http4s"))
+  .settings(commonSettings)
+  .settings(
+    name := "reverse-proxy-http4s",
+    libraryDependencies ++= Seq(
+      "com.peknight" %%% "http4s-ext" % pekExtVersion,
+      "com.peknight" %%% "fs2-ext" % pekExtVersion,
+      "org.http4s" %%% "http4s-client" % http4sVersion,
+      "org.http4s" %%% "http4s-server" % http4sVersion,
+    ),
   )
 
 lazy val socks = (project in file("socks"))
@@ -138,6 +152,7 @@ lazy val socks5ClientCore = (crossProject(JSPlatform, JVMPlatform) in file("sock
 
 val fs2Version = "3.12.0"
 val ip4sCoreVersion = "3.7.0"
+val http4sVersion = "1.0.0-M34"
 val pekVersion = "0.1.0-SNAPSHOT"
 val pekExtVersion = pekVersion
 val pekErrorVersion = pekVersion
