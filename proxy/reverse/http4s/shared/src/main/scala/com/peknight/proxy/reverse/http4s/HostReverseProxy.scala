@@ -17,11 +17,11 @@ trait HostReverseProxy:
   def scheme: Option[Uri.Scheme] = None
   def proxyScheme: Option[Uri.Scheme] = None
   def overwriteReferrer: Boolean = false
-  private def requestUriF: PartialFunction[Uri, Uri] =
+  def requestUriF: PartialFunction[Uri, Uri] =
     uriF(proxyHost, host, port, scheme)
-  private def responseUriF: PartialFunction[Uri, Uri] =
+  def responseUriF: PartialFunction[Uri, Uri] =
     uriF(host, proxyHost, proxyPort, proxyScheme)
-  private def uriF(matcher: Host, host: Host, port: Option[Port], scheme: Option[Uri.Scheme]): PartialFunction[Uri, Uri] =
+  def uriF(matcher: Host, host: Host, port: Option[Port], scheme: Option[Uri.Scheme]): PartialFunction[Uri, Uri] =
     case uri if uri.host.exists(_.value.contains(matcher.toString)) =>
       uri.withAuthority(org.http4s.Uri.Host.fromIp4sHost(host), port, replacePort = true)
         .copy(scheme = scheme.orElse(uri.scheme))
