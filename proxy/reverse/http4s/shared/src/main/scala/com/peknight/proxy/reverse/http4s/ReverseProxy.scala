@@ -82,10 +82,7 @@ trait ReverseProxy:
               .removeHeader(ci"Sec-WebSocket-Extensions")
               .headers
             val wsRequest = WSRequest(request.uri.copy(scheme = Some(scheme)), headers, request.method)
-            wsClientR.flatMap(_.connect(wsRequest)).allocated.attempt.map { either =>
-              println(either)
-              either
-            }.rethrow.flatMap{ (connection, release) =>
+            wsClientR.flatMap(_.connect(wsRequest)).allocated.flatMap{ (connection, release) =>
               for
                 resp <- webSocketBuilder.build(webSocketFramePipe(connection))
                 response <- handleResponse(resp, release, contentLocationF, locationF, responseF)
