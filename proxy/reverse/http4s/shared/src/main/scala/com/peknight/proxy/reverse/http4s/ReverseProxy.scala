@@ -73,7 +73,15 @@ trait ReverseProxy:
               case scheme if scheme === Uri.Scheme.https => wss.some
               case _ => None
             }).getOrElse(ws)
-            val wsRequest = WSRequest(request.uri.copy(scheme = Some(scheme)), request.headers, request.method)
+            val headers = request
+              .removeHeader[Connection]
+              .removeHeader[Host]
+              .removeHeader[Upgrade]
+              .removeHeader[`Sec-WebSocket-Key`]
+              .removeHeader[`Sec-WebSocket-Version`]
+              .removeHeader(ci"Sec-WebSocket-Extensions")
+              .headers
+            val wsRequest = WSRequest(request.uri.copy(scheme = Some(scheme)), headers, request.method)
             wsClientR.flatMap(_.connect(wsRequest)).allocated.attempt.map { either =>
               println(either)
               either
