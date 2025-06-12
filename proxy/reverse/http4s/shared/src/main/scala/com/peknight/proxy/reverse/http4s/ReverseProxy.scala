@@ -3,7 +3,6 @@ package com.peknight.proxy.reverse.http4s
 import cats.Monad
 import cats.effect.{Concurrent, Resource}
 import cats.syntax.applicative.*
-import cats.syntax.applicativeError.*
 import cats.syntax.eq.*
 import cats.syntax.flatMap.*
 import cats.syntax.functor.*
