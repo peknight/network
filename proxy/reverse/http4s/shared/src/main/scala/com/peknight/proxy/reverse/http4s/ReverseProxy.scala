@@ -129,6 +129,7 @@ trait ReverseProxy:
             .map(`X-Forwarded-Port`.apply)
           )
         )
+        .removeHeader[`X-Real-IP`].putHeaders(req.headers.get[`X-Real-IP`].orElse(req.remoteAddr.map(`X-Real-IP`.apply)))
       )
     yield
       request
