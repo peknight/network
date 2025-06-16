@@ -171,7 +171,7 @@ trait ReverseProxy:
         .putHeaders(contentLocation)
         .removeHeader[Location]
         .putHeaders(location)
-        .copy(entity = EntityEncoder[F, Stream[F, Byte]].toEntity(resp.body.onFinalize(release)))
+        .withBodyStream(resp.body.onFinalize(release))
       )
     yield
       response
