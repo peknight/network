@@ -14,12 +14,12 @@ import com.peknight.http4s.ext.syntax.uri.withAuthority
 import com.peknight.http4s.ext.uri.host.fromString
 import com.peknight.http4s.ext.uri.scheme.{ws, wss}
 import fs2.{Pipe, Stream}
+import org.http4s.*
 import org.http4s.client.Client
 import org.http4s.client.websocket.{WSClient, WSConnection, WSFrame, WSRequest}
 import org.http4s.headers.*
 import org.http4s.server.websocket.WebSocketBuilder
 import org.http4s.websocket.WebSocketFrame
-import org.http4s.{HttpRoutes, Request, Response, Uri}
 import org.typelevel.ci.CIStringSyntax
 
 trait ReverseProxy:
@@ -171,7 +171,7 @@ trait ReverseProxy:
         .putHeaders(contentLocation)
         .removeHeader[Location]
         .putHeaders(location)
-        .withEntity(resp.body.onFinalize(release))
+        .copy(entity = EntityEncoder[F, Stream[F, Byte]].toEntity(resp.body.onFinalize(release)))
       )
     yield
       response
