@@ -4,6 +4,22 @@ ThisBuild / scalaVersion := "3.7.1"
 
 ThisBuild / organization := "com.peknight"
 
+ThisBuild / publishTo := {
+  val nexus = "https://nexus.peknight.com/repository"
+  if (isSnapshot.value)
+    Some("snapshot" at s"$nexus/maven-snapshots/")
+  else
+    Some("releases" at s"$nexus/maven-releases/")
+}
+
+ThisBuild / credentials ++= Seq(
+  Credentials(Path.userHome / ".sbt" / ".credentials")
+)
+
+ThisBuild / resolvers ++= Seq(
+  "Pek Nexus" at "https://nexus.peknight.com/repository/maven-public/",
+)
+
 lazy val commonSettings = Seq(
   scalacOptions ++= Seq(
     "-feature",
