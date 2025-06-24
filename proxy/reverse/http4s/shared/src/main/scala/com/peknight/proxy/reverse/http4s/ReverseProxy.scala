@@ -15,6 +15,7 @@ import com.peknight.http4s.ext.uri.host.fromString
 import com.peknight.http4s.ext.uri.scheme.{ws, wss}
 import fs2.{Pipe, Stream}
 import org.http4s.*
+import org.http4s.Credentials.{AuthParams, Token}
 import org.http4s.client.Client
 import org.http4s.client.websocket.{WSClient, WSConnection, WSFrame, WSRequest}
 import org.http4s.headers.*
@@ -109,6 +110,10 @@ trait ReverseProxy:
       referrer <- referrerF(uri, req)
       scheme = req.uri.scheme.orElse(schemeOption)
       forwardedElem = forwardedElement(req, forwardedBy, scheme)
+      _ = req.headers.get[Authorization].map(_.credentials).map {
+        case AuthParams(authScheme, params) => s"Authorization $authScheme: $params"
+        case Token(authScheme, token) => s"Authorization $authScheme: $token"
+      }.fold(())(println)
       request <- requestF(req.withUri(uri)
         .removeHeader[Host].putHeaders(host)
         .removeHeader[Referer].putHeaders(referrer)
