@@ -120,6 +120,7 @@ trait ReverseProxy:
         .removeHeader[Forwarded].putHeaders(req.headers.get[Forwarded]
           .map(forwarded => forwarded.copy(values = forwarded.values.append(forwardedElem)))
           .getOrElse(Forwarded(forwardedElem)))
+        .removeHeader[Connection]
         .removeHeader[`X-Forwarded-For`].putHeaders(req.headers.get[`X-Forwarded-For`]
           .map(xForwardedFor => xForwardedFor.copy(values = xForwardedFor.values.append(req.remoteAddr)))
           .getOrElse(`X-Forwarded-For`(req.remoteAddr)))
