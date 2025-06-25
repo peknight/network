@@ -1,6 +1,6 @@
 package com.peknight.proxy.reverse.http4s
 
-import cats.Monad
+import cats.{Applicative, Monad}
 import cats.effect.{Concurrent, Resource}
 import cats.syntax.applicative.*
 import cats.syntax.eq.*
@@ -171,7 +171,10 @@ trait ReverseProxy:
         .putHeaders(contentLocation)
         .removeHeader[Location]
         .putHeaders(location)
-        .withBodyStream(resp.body.onFinalize(release))
+        .withBodyStream(resp.body.chunks
+          .evalTap(chunk => Applicative[F].pure(println(s"read chunk[${chunk.size}]: $chunk")))
+          .flatMap(Stream.chunk)
+          .onFinalize(release.map(_ => println("released"))))
       )
     yield
       response
