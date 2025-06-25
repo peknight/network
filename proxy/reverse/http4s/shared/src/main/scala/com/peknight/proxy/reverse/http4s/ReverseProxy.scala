@@ -1,7 +1,6 @@
 package com.peknight.proxy.reverse.http4s
 
 import cats.Monad
-import cats.data.NonEmptyList
 import cats.effect.{Concurrent, Resource}
 import cats.syntax.applicative.*
 import cats.syntax.eq.*
@@ -16,7 +15,6 @@ import com.peknight.http4s.ext.uri.host.fromString
 import com.peknight.http4s.ext.uri.scheme.{ws, wss}
 import fs2.{Pipe, Stream}
 import org.http4s.*
-import org.http4s.Credentials.{AuthParams, Token}
 import org.http4s.client.Client
 import org.http4s.client.websocket.{WSClient, WSConnection, WSFrame, WSRequest}
 import org.http4s.headers.*
@@ -117,9 +115,6 @@ trait ReverseProxy:
         .removeHeader[Forwarded].putHeaders(req.headers.get[Forwarded]
           .map(forwarded => forwarded.copy(values = forwarded.values.append(forwardedElem)))
           .getOrElse(Forwarded(forwardedElem)))
-        .removeHeader[Connection].putHeaders(req.headers.get[Connection]
-          .flatMap(connection => NonEmptyList.fromList(connection.values.filterNot(_ === ci"close")))
-          .map(Connection.apply))
         .removeHeader[`X-Forwarded-For`].putHeaders(req.headers.get[`X-Forwarded-For`]
           .map(xForwardedFor => xForwardedFor.copy(values = xForwardedFor.values.append(req.remoteAddr)))
           .getOrElse(`X-Forwarded-For`(req.remoteAddr)))
