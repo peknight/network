@@ -172,7 +172,7 @@ trait ReverseProxy:
         .removeHeader[Location]
         .putHeaders(location)
         .withBodyStream(resp.body.chunks
-          .evalTap(chunk => Applicative[F].pure(println(s"read chunk[${chunk.size}]: ${chunk.toByteVector.toHex}")))
+          .evalTap(chunk => Applicative[F].pure(println(s"read chunk[${chunk.size}]")))
           .flatMap(Stream.chunk)
           .onFinalize(release.map(_ => println("released"))))
       )
