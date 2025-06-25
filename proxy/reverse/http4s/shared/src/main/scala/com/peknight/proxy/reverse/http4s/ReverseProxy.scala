@@ -1,6 +1,7 @@
 package com.peknight.proxy.reverse.http4s
 
 import cats.Monad
+import cats.data.NonEmptyList
 import cats.effect.{Concurrent, Resource}
 import cats.syntax.applicative.*
 import cats.syntax.eq.*
@@ -110,17 +111,15 @@ trait ReverseProxy:
       referrer <- referrerF(uri, req)
       scheme = req.uri.scheme.orElse(schemeOption)
       forwardedElem = forwardedElement(req, forwardedBy, scheme)
-      _ = req.headers.get[Authorization].map(_.credentials).map {
-        case AuthParams(authScheme, params) => s"Authorization $authScheme: $params"
-        case Token(authScheme, token) => s"Authorization $authScheme: $token"
-      }.fold(())(println)
       request <- requestF(req.withUri(uri)
         .removeHeader[Host].putHeaders(host)
         .removeHeader[Referer].putHeaders(referrer)
         .removeHeader[Forwarded].putHeaders(req.headers.get[Forwarded]
           .map(forwarded => forwarded.copy(values = forwarded.values.append(forwardedElem)))
           .getOrElse(Forwarded(forwardedElem)))
-        .removeHeader[Connection]
+        .removeHeader[Connection].putHeaders(req.headers.get[Connection]
+          .flatMap(connection => NonEmptyList.fromList(connection.values.filterNot(_ === ci"close")))
+          .map(Connection.apply))
         .removeHeader[`X-Forwarded-For`].putHeaders(req.headers.get[`X-Forwarded-For`]
           .map(xForwardedFor => xForwardedFor.copy(values = xForwardedFor.values.append(req.remoteAddr)))
           .getOrElse(`X-Forwarded-For`(req.remoteAddr)))
