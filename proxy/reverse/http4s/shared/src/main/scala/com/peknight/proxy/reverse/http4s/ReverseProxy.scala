@@ -130,7 +130,6 @@ trait ReverseProxy:
           )
         )
         .removeHeader[`X-Real-IP`].putHeaders(req.headers.get[`X-Real-IP`].orElse(req.remoteAddr.map(`X-Real-IP`.apply)))
-        .removeHeader[Connection]
       )
     yield
       request
@@ -178,7 +177,6 @@ trait ReverseProxy:
             yield
               resp
             else
-              println("")
               resp.withEntity(Entity.Default(body
                 .chunks
                 .evalTap(chunk => println(s"read chunk: ${chunk.size}").pure[F])
@@ -190,7 +188,6 @@ trait ReverseProxy:
         .putHeaders(contentLocation)
         .removeHeader[Location]
         .putHeaders(location)
-        .removeHeader[Connection]
       )
     yield
       response
