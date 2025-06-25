@@ -13,7 +13,7 @@ import com.peknight.fs2.ext.pipe.scanS
 import com.peknight.http4s.ext.syntax.uri.withAuthority
 import com.peknight.http4s.ext.uri.host.fromString
 import com.peknight.http4s.ext.uri.scheme.{ws, wss}
-import fs2.{Pipe, Stream}
+import fs2.{Chunk, Pipe, Stream}
 import org.http4s.*
 import org.http4s.client.Client
 import org.http4s.client.websocket.{WSClient, WSConnection, WSFrame, WSRequest}
@@ -159,7 +159,7 @@ trait ReverseProxy:
     val withHostElement = forwardedHost.fold(withByElement)(withByElement.withHost)
     forwardedProto.fold(withHostElement)(withHostElement.withProto)
 
-  private def handleResponse[F[_]: Monad](resp: Response[F], release: F[Unit],
+  private def handleResponse[F[_]: Concurrent](resp: Response[F], release: F[Unit],
                                           contentLocationF: Response[F] => F[Option[`Content-Location`]],
                                           locationF: Response[F] => F[Option[Location]],
                                           responseF: Response[F] => F[Response[F]]): F[Response[F]] =
@@ -168,14 +168,27 @@ trait ReverseProxy:
       location <- locationF(resp)
       given CanEqual[Entity[F], Entity[F]] = CanEqual.derived
       resp <- resp.entity match
-        case Entity.Default(body, length) => resp.withEntity(Entity.Default(body.onFinalize(release), length)).pure[F]
+        case Entity.Default(body, length) =>
+          if resp.headers.get[`Content-Type`].exists(_.mediaType.subType.contains("docker")) then
+            for
+              vec <- body.compile.toVector
+              _ = println(s"docker length: ${vec.length}")
+              resp <- release.as(resp.withEntity(Entity.strict(Chunk.from(vec))))
+            yield
+              resp
+            else
+              println("")
+              resp.withEntity(Entity.Default(body
+                .chunks
+                .evalTap(chunk => println(s"read chunk: ${chunk.size}").pure[F])
+                .flatMap(Stream.chunk)
+                .onFinalize(release.as(println("released"))), length)).pure[F]
         case _ => release.as(resp)
       response <- responseF(resp
         .removeHeader[`Content-Location`]
         .putHeaders(contentLocation)
         .removeHeader[Location]
         .putHeaders(location)
-        .removeHeader[Connection]
       )
     yield
       response
