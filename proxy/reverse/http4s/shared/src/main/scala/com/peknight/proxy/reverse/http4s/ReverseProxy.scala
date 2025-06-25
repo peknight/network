@@ -166,6 +166,7 @@ trait ReverseProxy:
     for
       contentLocation <- contentLocationF(resp)
       location <- locationF(resp)
+      _ = println(s"entityType: ${resp.entity.getClass.getSimpleName}")
       response <- responseF(resp
         .removeHeader[`Content-Location`]
         .putHeaders(contentLocation)
