@@ -130,6 +130,7 @@ trait ReverseProxy:
           )
         )
         .removeHeader[`X-Real-IP`].putHeaders(req.headers.get[`X-Real-IP`].orElse(req.remoteAddr.map(`X-Real-IP`.apply)))
+        .removeHeader[Connection]
       )
     yield
       request
@@ -189,6 +190,7 @@ trait ReverseProxy:
         .putHeaders(contentLocation)
         .removeHeader[Location]
         .putHeaders(location)
+        .removeHeader[Connection]
       )
     yield
       response
