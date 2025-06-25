@@ -166,7 +166,11 @@ trait ReverseProxy:
     for
       contentLocation <- contentLocationF(resp)
       location <- locationF(resp)
-      _ = println(s"entityType: ${resp.entity.getClass.getSimpleName}")
+      given CanEqual[Entity[F], Entity[F]] = CanEqual.derived
+      _ = resp.entity match
+        case Entity.Default(body, length) => println(s"default entity: $length")
+        case Entity.Strict(chunk) => println("strict entity")
+        case Entity.Empty => println("empty entity")
       response <- responseF(resp
         .removeHeader[`Content-Location`]
         .putHeaders(contentLocation)
