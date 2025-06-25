@@ -1,6 +1,5 @@
 package com.peknight.proxy.reverse.http4s
 
-import cats.{Applicative, Monad}
 import cats.effect.{Concurrent, Resource}
 import cats.syntax.applicative.*
 import cats.syntax.eq.*
@@ -8,6 +7,7 @@ import cats.syntax.flatMap.*
 import cats.syntax.functor.*
 import cats.syntax.monadError.*
 import cats.syntax.option.*
+import cats.{Applicative, Monad}
 import com.comcast.ip4s.{Ipv4Address, Ipv6Address, Port}
 import com.peknight.fs2.ext.pipe.scanS
 import com.peknight.http4s.ext.syntax.uri.withAuthority
@@ -172,7 +172,7 @@ trait ReverseProxy:
         .removeHeader[Location]
         .putHeaders(location)
         .withBodyStream(resp.body.chunks
-          .evalTap(chunk => Applicative[F].pure(println(s"read chunk[${chunk.size}]: $chunk")))
+          .evalTap(chunk => Applicative[F].pure(println(s"read chunk[${chunk.size}]: ${chunk.toByteVector.toHex}")))
           .flatMap(Stream.chunk)
           .onFinalize(release.map(_ => println("released"))))
       )
