@@ -10,10 +10,10 @@ import cats.syntax.monadError.*
 import cats.syntax.option.*
 import com.comcast.ip4s.{Ipv4Address, Ipv6Address, Port}
 import com.peknight.fs2.ext.pipe.scanS
-import com.peknight.http4s.ext.syntax.uri.withAuthority
+import com.peknight.http4s.ext.syntax.request.getUri
 import com.peknight.http4s.ext.uri.host.fromString
 import com.peknight.http4s.ext.uri.scheme.{ws, wss}
-import fs2.{Chunk, Pipe, Stream}
+import fs2.{Pipe, Stream}
 import org.http4s.*
 import org.http4s.client.Client
 import org.http4s.client.websocket.{WSClient, WSConnection, WSFrame, WSRequest}
@@ -33,8 +33,8 @@ trait ReverseProxy:
                              forwardedBy: Option[Forwarded.Node] = None,
                              overwriteReferrer: Boolean = false
                            )(f: PartialFunction[Uri, Uri])(g: PartialFunction[Uri, Uri]): HttpRoutes[F] =
-    apply[F](clientR, wsClientR, webSocketBuilder, req => f.isDefinedAt(getOriginUri(req)), scheme, wsScheme, forwardedBy,
-      req => f(getOriginUri(req)).pure[F],
+    apply[F](clientR, wsClientR, webSocketBuilder, req => f.isDefinedAt(req.getUri), scheme, wsScheme, forwardedBy,
+      req => f(req.getUri).pure[F],
       (uri, req) => uri.host.map(host => Host(host.value, uri.authority.flatMap(_.port))).pure[F],
       (uri, req) =>
         if overwriteReferrer then
@@ -168,20 +168,7 @@ trait ReverseProxy:
       location <- locationF(resp)
       given CanEqual[Entity[F], Entity[F]] = CanEqual.derived
       resp <- resp.entity match
-        case Entity.Default(body, length) =>
-          if resp.headers.get[`Content-Type`].exists(_.mediaType.subType.contains("docker")) then
-            for
-              vec <- body.compile.toVector
-              _ = println(s"docker length: ${vec.length}")
-              resp <- release.as(resp.withEntity(Entity.strict(Chunk.from(vec))))
-            yield
-              resp
-            else
-              resp.withEntity(Entity.Default(body
-                .chunks
-                .evalTap(chunk => println(s"read chunk: ${chunk.size}").pure[F])
-                .flatMap(Stream.chunk)
-                .onFinalize(release.as(println("released"))), length)).pure[F]
+        case Entity.Default(body, length) => resp.withEntity(Entity.Default(body.onFinalize(release), length)).pure[F]
         case _ => release.as(resp)
       response <- responseF(resp
         .removeHeader[`Content-Location`]
@@ -213,12 +200,6 @@ trait ReverseProxy:
         case WSFrame.Binary(data, last) => WebSocketFrame.Binary(data, last).pure[F]
       }.map(_.some)
     ).parJoin(2).collect { case Some(frame) => frame }
-
-  private def getOriginUri[F[_]](req: Request[F]): Uri =
-    req.headers.get[Host]
-      .flatMap(host => fromString(host.host)
-        .map(uriHost => req.uri.withAuthority(uriHost, host.port.flatMap(Port.fromInt), replacePort = true)))
-      .getOrElse(req.uri)
 
   extension [A] (option: Option[A])
     private def mapUri(f: PartialFunction[Uri, Uri])(get: A => Uri)(update: (A, Uri) => A): Option[A] =
