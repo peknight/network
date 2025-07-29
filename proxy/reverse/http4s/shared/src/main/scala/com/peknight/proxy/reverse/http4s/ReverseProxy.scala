@@ -10,7 +10,6 @@ import cats.syntax.monadError.*
 import cats.syntax.option.*
 import com.comcast.ip4s.{Ipv4Address, Ipv6Address, Port}
 import com.peknight.fs2.ext.pipe.scanS
-import com.peknight.http4s.ext.syntax.request.getUri
 import com.peknight.http4s.ext.uri.host.fromString
 import com.peknight.http4s.ext.uri.scheme.{ws, wss}
 import fs2.{Pipe, Stream}
@@ -33,9 +32,9 @@ trait ReverseProxy:
                              wsScheme: Option[Uri.Scheme] = None,
                              forwardedBy: Option[Forwarded.Node] = None,
                              overwriteReferrer: Boolean = false
-                           )(f: PartialFunction[Uri, Uri])(g: PartialFunction[Uri, Uri]): HttpRoutes[F] =
-    apply[F](clientR, wsClientR, webSocketBuilder, req => f.isDefinedAt(req.getUri), scheme, wsScheme, forwardedBy,
-      req => f(req.getUri).pure[F],
+                           )(f: PartialFunction[Uri, Uri])(g: PartialFunction[Uri, Uri])(reqF: PartialFunction[Request[F], Uri]): HttpRoutes[F] =
+    apply[F](clientR, wsClientR, webSocketBuilder, req => reqF.isDefinedAt(req), scheme, wsScheme, forwardedBy,
+      req => reqF(req).pure[F],
       (uri, req) => uri.host.map(host => Host(host.value, uri.authority.flatMap(_.port))).pure[F],
       (uri, req) =>
         if overwriteReferrer then

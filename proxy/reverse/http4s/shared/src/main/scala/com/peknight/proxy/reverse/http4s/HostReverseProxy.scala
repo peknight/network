@@ -2,12 +2,13 @@ package com.peknight.proxy.reverse.http4s
 
 import cats.effect.{Concurrent, Resource}
 import com.comcast.ip4s.{Host, Port}
+import com.peknight.http4s.ext.syntax.request.getUri
 import com.peknight.http4s.ext.syntax.uri.withAuthority
 import org.http4s.client.Client
 import org.http4s.client.websocket.WSClient
 import org.http4s.headers.Forwarded
 import org.http4s.server.websocket.WebSocketBuilder
-import org.http4s.{HttpRoutes, Uri}
+import org.http4s.{HttpRoutes, Request, Uri}
 
 trait HostReverseProxy:
   def host: Host
@@ -26,11 +27,14 @@ trait HostReverseProxy:
     case uri if uri.host.exists(_.value.contains(matcher.toString)) =>
       uri.withAuthority(org.http4s.Uri.Host.fromIp4sHost(host), port, replacePort = true)
         .copy(scheme = scheme.orElse(uri.scheme))
+  def requestF[F[_]]: PartialFunction[Request[F], Uri] =
+    case req if requestUriF.isDefinedAt(req.getUri) =>
+      requestUriF(req.getUri)
   def apply[F[_]: Concurrent](
                                clientR: Resource[F, Client[F]],
                                wsClientR: Resource[F, WSClient[F]],
                                webSocketBuilder: WebSocketBuilder[F],
                                forwardedBy: Option[Forwarded.Node] = None
                              ): HttpRoutes[F] =
-    ReverseProxy.uri[F](clientR, wsClientR, webSocketBuilder, proxyScheme, wsScheme, forwardedBy, overwriteReferrer)(requestUriF)(responseUriF)
+    ReverseProxy.uri[F](clientR, wsClientR, webSocketBuilder, proxyScheme, wsScheme, forwardedBy, overwriteReferrer)(requestUriF)(responseUriF)(requestF)
 end HostReverseProxy
