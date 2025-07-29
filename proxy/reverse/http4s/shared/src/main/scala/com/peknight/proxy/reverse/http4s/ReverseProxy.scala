@@ -32,18 +32,18 @@ trait ReverseProxy:
                              wsScheme: Option[Uri.Scheme] = None,
                              forwardedBy: Option[Forwarded.Node] = None,
                              overwriteReferrer: Boolean = false
-                           )(f: PartialFunction[Uri, Uri])(g: PartialFunction[Uri, Uri])(reqF: PartialFunction[Request[F], Uri]): HttpRoutes[F] =
-    apply[F](clientR, wsClientR, webSocketBuilder, req => reqF.isDefinedAt(req), scheme, wsScheme, forwardedBy,
-      req => reqF(req).pure[F],
+                           )(f: PartialFunction[Request[F], Uri])(g: PartialFunction[Request[F], Uri]): HttpRoutes[F] =
+    apply[F](clientR, wsClientR, webSocketBuilder, req => f.isDefinedAt(req), scheme, wsScheme, forwardedBy,
+      req => f(req).pure[F],
       (uri, req) => uri.host.map(host => Host(host.value, uri.authority.flatMap(_.port))).pure[F],
       (uri, req) =>
         if overwriteReferrer then
-          req.headers.get[Referer].mapUri(f)(_.uri)((referrer, uri) => referrer.copy(uri = uri)).pure[F]
+          req.headers.get[Referer].mapUri(req)(f)(_.uri)((referrer, uri) => referrer.copy(uri = uri)).pure[F]
         else req.headers.get[Referer].pure[F],
       req => req.pure[F],
-      resp => resp.headers.get[`Content-Location`].mapUri(g)(_.uri)((location, uri) => location.copy(uri = uri)).pure[F],
-      resp => resp.headers.get[Location].mapUri(g)(_.uri)((location, uri) => location.copy(uri = uri)).pure[F],
-      resp => resp.pure[F]
+      (req, resp) => resp.headers.get[`Content-Location`].mapUri(req)(g)(_.uri)((location, uri) => location.copy(uri = uri)).pure[F],
+      (req, resp) => resp.headers.get[Location].mapUri(req)(g)(_.uri)((location, uri) => location.copy(uri = uri)).pure[F],
+      (req, resp) => resp.pure[F]
     )
 
   def apply[F[_]: Concurrent](
@@ -58,9 +58,9 @@ trait ReverseProxy:
                                hostF: (Uri, Request[F]) => F[Option[Host]],
                                referrerF: (Uri, Request[F]) => F[Option[Referer]],
                                requestF: Request[F] => F[Request[F]],
-                               contentLocationF: Response[F] => F[Option[`Content-Location`]],
-                               locationF: Response[F] => F[Option[Location]],
-                               responseF: Response[F] => F[Response[F]]
+                               contentLocationF: (Request[F], Response[F]) => F[Option[`Content-Location`]],
+                               locationF: (Request[F], Response[F]) => F[Option[Location]],
+                               responseF: (Request[F], Response[F]) => F[Response[F]]
                              ): HttpRoutes[F] = HttpRoutes.of[F] {
     case req if isDefinedAt(req) =>
       for
@@ -84,13 +84,13 @@ trait ReverseProxy:
             wsClientR.flatMap(_.connect(wsRequest)).allocated.flatMap{ (connection, release) =>
               for
                 resp <- webSocketBuilder.build(webSocketFramePipe(connection))
-                response <- handleResponse(resp, release, req.method, contentLocationF, locationF, responseF)
+                response <- handleResponse(req, resp, release, contentLocationF, locationF, responseF)
               yield
                 response
             }
           else
             clientR.flatMap(_.run(request)).allocated.flatMap((resp, release) =>
-              handleResponse(resp, release, req.method, contentLocationF, locationF, responseF)
+              handleResponse(req, resp, release, contentLocationF, locationF, responseF)
             )
       yield
         response
@@ -160,21 +160,21 @@ trait ReverseProxy:
     forwardedProto.fold(withHostElement)(withHostElement.withProto)
 
   private def handleResponse[F[_]: Concurrent](
+                                                req: Request[F],
                                                 resp: Response[F], release: F[Unit],
-                                                method: Method,
-                                                contentLocationF: Response[F] => F[Option[`Content-Location`]],
-                                                locationF: Response[F] => F[Option[Location]],
-                                                responseF: Response[F] => F[Response[F]]): F[Response[F]] =
+                                                contentLocationF: (Request[F], Response[F]) => F[Option[`Content-Location`]],
+                                                locationF: (Request[F], Response[F]) => F[Option[Location]],
+                                                responseF: (Request[F], Response[F]) => F[Response[F]]): F[Response[F]] =
     for
-      contentLocation <- contentLocationF(resp)
-      location <- locationF(resp)
+      contentLocation <- contentLocationF(req, resp)
+      location <- locationF(req, resp)
       given CanEqual[Method, Method] = CanEqual.derived
       given CanEqual[Entity[F], Entity[F]] = CanEqual.derived
-      resp <- (method, resp.entity) match
+      resp <- (req.method, resp.entity) match
         case (HEAD, _) => release.as(resp.withEntity[F](Entity.Empty))
         case (_, Entity.Default(body, length)) => resp.withEntity(Entity.Default(body.onFinalize(release), length)).pure[F]
         case _ => release.as(resp)
-      response <- responseF(resp
+      response <- responseF(req, resp
         .removeHeader[`Content-Location`]
         .putHeaders(contentLocation)
         .removeHeader[Location]
@@ -206,10 +206,11 @@ trait ReverseProxy:
     ).parJoin(2).collect { case Some(frame) => frame }
 
   extension [A] (option: Option[A])
-    private def mapUri(f: PartialFunction[Uri, Uri])(get: A => Uri)(update: (A, Uri) => A): Option[A] =
+    private def mapUri[F[_]](request: Request[F])(f: PartialFunction[Request[F], Uri])(get: A => Uri)(update: (A, Uri) => A): Option[A] =
       option.map { a =>
         val origin = get(a)
-        if f.isDefinedAt(origin) then update(a, f(origin)) else a
+        val req = request.withUri(origin).removeHeader[Host]
+        if f.isDefinedAt(req) then update(a, f(req)) else a
       }
   end extension
 end ReverseProxy

@@ -30,11 +30,14 @@ trait HostReverseProxy:
   def requestF[F[_]]: PartialFunction[Request[F], Uri] =
     case req if requestUriF.isDefinedAt(req.getUri) =>
       requestUriF(req.getUri)
+  def responseF[F[_]]: PartialFunction[Request[F], Uri] =
+    case req if requestUriF.isDefinedAt(req.getUri) =>
+      responseUriF(req.getUri)
   def apply[F[_]: Concurrent](
                                clientR: Resource[F, Client[F]],
                                wsClientR: Resource[F, WSClient[F]],
                                webSocketBuilder: WebSocketBuilder[F],
                                forwardedBy: Option[Forwarded.Node] = None
                              ): HttpRoutes[F] =
-    ReverseProxy.uri[F](clientR, wsClientR, webSocketBuilder, proxyScheme, wsScheme, forwardedBy, overwriteReferrer)(requestUriF)(responseUriF)(requestF)
+    ReverseProxy.uri[F](clientR, wsClientR, webSocketBuilder, proxyScheme, wsScheme, forwardedBy, overwriteReferrer)(requestF)(responseF)
 end HostReverseProxy
