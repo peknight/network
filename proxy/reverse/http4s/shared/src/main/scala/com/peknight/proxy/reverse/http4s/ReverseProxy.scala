@@ -15,6 +15,7 @@ import com.peknight.http4s.ext.uri.host.fromString
 import com.peknight.http4s.ext.uri.scheme.{ws, wss}
 import fs2.{Pipe, Stream}
 import org.http4s.*
+import org.http4s.Method.HEAD
 import org.http4s.client.Client
 import org.http4s.client.websocket.{WSClient, WSConnection, WSFrame, WSRequest}
 import org.http4s.headers.*
@@ -84,13 +85,13 @@ trait ReverseProxy:
             wsClientR.flatMap(_.connect(wsRequest)).allocated.flatMap{ (connection, release) =>
               for
                 resp <- webSocketBuilder.build(webSocketFramePipe(connection))
-                response <- handleResponse(resp, release, contentLocationF, locationF, responseF)
+                response <- handleResponse(resp, release, req.method, contentLocationF, locationF, responseF)
               yield
                 response
             }
           else
             clientR.flatMap(_.run(request)).allocated.flatMap((resp, release) =>
-              handleResponse(resp, release, contentLocationF, locationF, responseF)
+              handleResponse(resp, release, req.method, contentLocationF, locationF, responseF)
             )
       yield
         response
@@ -159,16 +160,20 @@ trait ReverseProxy:
     val withHostElement = forwardedHost.fold(withByElement)(withByElement.withHost)
     forwardedProto.fold(withHostElement)(withHostElement.withProto)
 
-  private def handleResponse[F[_]: Concurrent](resp: Response[F], release: F[Unit],
-                                          contentLocationF: Response[F] => F[Option[`Content-Location`]],
-                                          locationF: Response[F] => F[Option[Location]],
-                                          responseF: Response[F] => F[Response[F]]): F[Response[F]] =
+  private def handleResponse[F[_]: Concurrent](
+                                                resp: Response[F], release: F[Unit],
+                                                method: Method,
+                                                contentLocationF: Response[F] => F[Option[`Content-Location`]],
+                                                locationF: Response[F] => F[Option[Location]],
+                                                responseF: Response[F] => F[Response[F]]): F[Response[F]] =
     for
       contentLocation <- contentLocationF(resp)
       location <- locationF(resp)
+      given CanEqual[Method, Method] = CanEqual.derived
       given CanEqual[Entity[F], Entity[F]] = CanEqual.derived
-      resp <- resp.entity match
-        case Entity.Default(body, length) => resp.withEntity(Entity.Default(body.onFinalize(release), length)).pure[F]
+      resp <- (method, resp.entity) match
+        case (HEAD, _) => release.as(resp.withEntity[F](Entity.Empty))
+        case (_, Entity.Default(body, length)) => resp.withEntity(Entity.Default(body.onFinalize(release), length)).pure[F]
         case _ => release.as(resp)
       response <- responseF(resp
         .removeHeader[`Content-Location`]
