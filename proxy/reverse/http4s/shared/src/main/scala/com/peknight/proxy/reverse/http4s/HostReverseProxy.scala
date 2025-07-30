@@ -31,7 +31,7 @@ trait HostReverseProxy:
     case req if requestUriF.isDefinedAt(req.getUri) =>
       requestUriF(req.getUri)
   def responseF[F[_]]: PartialFunction[Request[F], Uri] =
-    case req if requestUriF.isDefinedAt(req.getUri) =>
+    case req if responseUriF.isDefinedAt(req.getUri) =>
       responseUriF(req.getUri)
   def apply[F[_]: Concurrent](
                                clientR: Resource[F, Client[F]],
