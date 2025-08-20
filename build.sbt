@@ -1,100 +1,52 @@
-ThisBuild / version := "0.1.0-SNAPSHOT"
+import com.peknight.build.gav.*
+import com.peknight.build.sbt.*
 
-ThisBuild / scalaVersion := "3.7.1"
-
-ThisBuild / organization := "com.peknight"
-
-ThisBuild / versionScheme := Some("early-semver")
-
-ThisBuild / publishTo := {
-  val nexus = "https://nexus.peknight.com/repository"
-  if (isSnapshot.value)
-    Some("snapshot" at s"$nexus/maven-snapshots/")
-  else
-    Some("releases" at s"$nexus/maven-releases/")
-}
-
-ThisBuild / credentials ++= Seq(
-  Credentials(Path.userHome / ".sbt" / ".credentials")
-)
-
-ThisBuild / resolvers ++= Seq(
-  "Pek Nexus" at "https://nexus.peknight.com/repository/maven-public/",
-)
-
-lazy val commonSettings = Seq(
-  scalacOptions ++= Seq(
-    "-feature",
-    "-deprecation",
-    "-unchecked",
-    "-Xfatal-warnings",
-    "-language:strictEquality",
-    "-Xmax-inlines:64"
-  ),
-)
+commonSettings
 
 lazy val network = (project in file("."))
+  .settings(name := "network")
   .aggregate(
     socks,
     proxy,
   )
-  .settings(commonSettings)
-  .settings(
-    name := "network",
-  )
 
 lazy val proxy = (project in file("proxy"))
+  .settings(name := "proxy")
   .aggregate(
     reverseProxy,
   )
-  .settings(commonSettings)
-  .settings(
-    name := "proxy",
-  )
 
 lazy val reverseProxy = (project in file("proxy/reverse"))
+  .settings(name := "reverse-proxy")
   .aggregate(
     reverseProxyHttp4s.jvm,
     reverseProxyHttp4s.js,
   )
-  .settings(commonSettings)
-  .settings(
-    name := "reverse-proxy",
-  )
 
-lazy val reverseProxyHttp4s = (crossProject(JSPlatform, JVMPlatform) in file("proxy/reverse/http4s"))
-  .settings(commonSettings)
-  .settings(
-    name := "reverse-proxy-http4s",
-    libraryDependencies ++= Seq(
-      "com.peknight" %%% "http4s-ext" % pekExtVersion,
-      "com.peknight" %%% "fs2-ext" % pekExtVersion,
-      "org.http4s" %%% "http4s-client" % http4sVersion,
-      "org.http4s" %%% "http4s-server" % http4sVersion,
-    ),
-  )
+lazy val reverseProxyHttp4s = (crossProject(JVMPlatform, JSPlatform) in file("proxy/reverse/http4s"))
+  .settings(name := "reverse-proxy-http4s")
+  .settings(crossDependencies(
+    peknight.ext.http4s,
+    peknight.ext.fs2,
+    http4s.client,
+    http4s.server,
+  ))
 
 lazy val socks = (project in file("socks"))
+  .settings(name := "socks")
   .aggregate(
     socksCore.jvm,
     socksCore.js,
+    socksCore.native,
     socks5,
   )
-  .settings(commonSettings)
-  .settings(
-    name := "socks",
-  )
 
-lazy val socksCore = (crossProject(JSPlatform, JVMPlatform) in file("socks/core"))
-  .settings(commonSettings)
-  .settings(
-    name := "socks-core",
-    libraryDependencies ++= Seq(
-      "com.peknight" %%% "error-core" % pekErrorVersion,
-    ),
-  )
+lazy val socksCore = (crossProject(JVMPlatform, JSPlatform, NativePlatform) in file("socks/core"))
+  .settings(name := "socks-core")
+  .settings(crossDependencies(peknight.error))
 
 lazy val socks5 = (project in file("socks/socks5"))
+  .settings(name := "socks5")
   .aggregate(
     socks5Core.jvm,
     socks5Core.js,
@@ -103,74 +55,39 @@ lazy val socks5 = (project in file("socks/socks5"))
     socks5Server,
     socks5Client,
   )
-  .settings(commonSettings)
-  .settings(
-    name := "socks5",
-  )
 
-lazy val socks5Core = (crossProject(JSPlatform, JVMPlatform) in file("socks/socks5/core"))
+lazy val socks5Core = (crossProject(JVMPlatform, JSPlatform) in file("socks/socks5/core"))
   .dependsOn(socksCore)
-  .settings(commonSettings)
-  .settings(
-    name := "socks5-core",
-    libraryDependencies ++= Seq(
-      "co.fs2" %%% "fs2-core" % fs2Version,
-      "com.comcast" %%% "ip4s-core" % ip4sCoreVersion,
-    ),
-  )
+  .settings(name := "socks5-core")
+  .settings(crossDependencies(
+    fs2,
+    comcast.ip4s
+  ))
 
-lazy val socks5Api = (crossProject(JSPlatform, JVMPlatform) in file("socks/socks5/api"))
+lazy val socks5Api = (crossProject(JVMPlatform, JSPlatform) in file("socks/socks5/api"))
   .dependsOn(socks5Core)
-  .settings(commonSettings)
-  .settings(
-    name := "socks5-api",
-    libraryDependencies ++= Seq(
-      "co.fs2" %%% "fs2-io" % fs2Version,
-    ),
-  )
+  .settings(name := "socks5-api")
+  .settings(crossDependencies(fs2.io))
 
 lazy val socks5Server = (project in file("socks/socks5/server"))
+  .settings(name := "socks5-server")
   .aggregate(
     socks5ServerCore.jvm,
     socks5ServerCore.js,
   )
-  .settings(commonSettings)
-  .settings(
-    name := "socks5-server",
-  )
 
-lazy val socks5ServerCore = (crossProject(JSPlatform, JVMPlatform) in file("socks/socks5/server/core"))
+lazy val socks5ServerCore = (crossProject(JVMPlatform, JSPlatform) in file("socks/socks5/server/core"))
   .dependsOn(socks5Api)
-  .settings(commonSettings)
-  .settings(
-    name := "socks5-server-core",
-    libraryDependencies ++= Seq(
-      "com.peknight" %%% "cats-ext" % pekExtVersion,
-    ),
-  )
+  .settings(name := "socks5-server-core")
+  .settings(crossDependencies(peknight.ext.cats))
 
 lazy val socks5Client = (project in file("socks/socks5/client"))
+  .settings(name := "socks5-client")
   .aggregate(
     socks5ClientCore.jvm,
     socks5ClientCore.js,
   )
-  .settings(commonSettings)
-  .settings(
-    name := "socks5-client",
-  )
 
-lazy val socks5ClientCore = (crossProject(JSPlatform, JVMPlatform) in file("socks/socks5/client/core"))
+lazy val socks5ClientCore = (crossProject(JVMPlatform, JSPlatform) in file("socks/socks5/client/core"))
   .dependsOn(socks5Api)
-  .settings(commonSettings)
-  .settings(
-    name := "socks5-client-core",
-    libraryDependencies ++= Seq(
-    ),
-  )
-
-val fs2Version = "3.12.0"
-val ip4sCoreVersion = "3.7.0"
-val http4sVersion = "1.0.0-M34"
-val pekVersion = "0.1.0-SNAPSHOT"
-val pekExtVersion = pekVersion
-val pekErrorVersion = pekVersion
+  .settings(name := "socks5-client-core")
