@@ -1,5 +1,7 @@
 test.txt
 
+build.properties
+
 .bsp/
 .bloop/
 .metals/
