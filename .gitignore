@@ -2,7 +2,6 @@ test.txt
 
 build.properties
 
-.bsp/
 .bloop/
 .metals/
 metals.sbt
@@ -19,6 +18,9 @@ target/
 *.iws
 *.iml
 *.ipr
+out/
+!**/src/main/**/out/
+!**/src/test/**/out/
 
 ### Eclipse ###
 .apt_generated
@@ -28,6 +30,9 @@ target/
 .settings
 .springBeans
 .sts4-cache
+bin/
+!**/src/main/**/bin/
+!**/src/test/**/bin/
 
 ### NetBeans ###
 /nbproject/private/
@@ -44,3 +49,6 @@ build/
 
 ### Mac OS ###
 .DS_Store
+
+### Scala ###
+.bsp/
