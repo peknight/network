@@ -186,22 +186,48 @@ trait ReverseProxy:
   private def webSocketFramePipe[F[_]: Concurrent](connection: WSConnection[F]): Pipe[F, WebSocketFrame, WebSocketFrame] =
     in => Stream(
       in.through(scanS[F, WebSocketFrame, WebSocketFrame, WSFrame, Boolean](true) {
-        case (_, frame: WebSocketFrame.Close) => (true, WSFrame.Close(frame.closeCode, ""))
-        case (_, frame: WebSocketFrame.Ping) => (true, WSFrame.Ping(frame.data))
-        case (_, frame: WebSocketFrame.Pong) => (true, WSFrame.Pong(frame.data))
-        case (_, frame: WebSocketFrame.Text) => (frame.last, WSFrame.Text(frame.str, frame.last))
-        case (_, frame: WebSocketFrame.Binary) => (true, WSFrame.Binary(frame.data, frame.last))
-        case (true, frame) => (true, WSFrame.Binary(frame.data, frame.last))
+        case (last, frame: WebSocketFrame.Close) =>
+          println(s"WebSocket|send|close|$last|${frame.data.toHex}|${frame.last}")
+          (frame.last, WSFrame.Close(frame.closeCode, ""))
+        case (last, frame: WebSocketFrame.Ping) =>
+          println(s"WebSocket|send|ping|$last|${frame.data.toHex}|${frame.last}")
+          (frame.last, WSFrame.Ping(frame.data))
+        case (last, frame: WebSocketFrame.Pong) =>
+          println(s"WebSocket|send|pong|$last|${frame.data.toHex}|${frame.last}")
+          (frame.last, WSFrame.Pong(frame.data))
+        case (last, frame: WebSocketFrame.Text) =>
+          println(s"WebSocket|send|text|$last|${frame.data.toHex}|${frame.last}|${frame.str}")
+          (frame.last, WSFrame.Text(frame.str, frame.last))
+        case (last, frame: WebSocketFrame.Binary) =>
+          println(s"WebSocket|send|binary|$last|${frame.data.toHex}|${frame.last}")
+          (true, WSFrame.Binary(frame.data, frame.last))
+        case (true, frame) =>
+          println(s"WebSocket|send|${frame.getClass.getSimpleName}|true|${frame.data.toHex}|${frame.last}")
+          (true, WSFrame.Binary(frame.data, frame.last))
         case (false, frame) => frame.data.decodeUtf8 match
-          case Right(data) => (frame.last, WSFrame.Text(data, frame.last))
-          case _ => (true, WSFrame.Binary(frame.data, frame.last))
+          case Right(data) =>
+            println(s"WebSocket|send|${frame.getClass.getSimpleName}|false|${frame.data.toHex}|${frame.last}|text|$data")
+            (frame.last, WSFrame.Text(data, frame.last))
+          case _ =>
+            println(s"WebSocket|send|${frame.getClass.getSimpleName}|false|${frame.data.toHex}|${frame.last}|binary")
+            (true, WSFrame.Binary(frame.data, frame.last))
       }).through(connection.sendPipe).map(_ => none[WebSocketFrame]),
       connection.receiveStream.evalMap {
-        case WSFrame.Close(statusCode, reason) => WebSocketFrame.Close(statusCode).pure[F].rethrow
-        case WSFrame.Ping(data) => WebSocketFrame.Ping(data).pure[F]
-        case WSFrame.Pong(data) => WebSocketFrame.Pong(data).pure[F]
-        case WSFrame.Text(data, last) => WebSocketFrame.Text(data, last).pure[F]
-        case WSFrame.Binary(data, last) => WebSocketFrame.Binary(data, last).pure[F]
+        case WSFrame.Close(statusCode, reason) =>
+          println(s"WebSocket|receive|close|$statusCode|$reason")
+          WebSocketFrame.Close(statusCode).pure[F].rethrow
+        case WSFrame.Ping(data) =>
+          println(s"WebSocket|receive|ping|${data.toHex}")
+          WebSocketFrame.Ping(data).pure[F]
+        case WSFrame.Pong(data) =>
+          println(s"WebSocket|receive|pong|${data.toHex}")
+          WebSocketFrame.Pong(data).pure[F]
+        case WSFrame.Text(data, last) =>
+          println(s"WebSocket|receive|text|$data|$last")
+          WebSocketFrame.Text(data, last).pure[F]
+        case WSFrame.Binary(data, last) =>
+          println(s"WebSocket|receive|binary|${data.toHex}|$last")
+          WebSocketFrame.Binary(data, last).pure[F]
       }.map(_.some)
     ).parJoin(2).collect { case Some(frame) => frame }
 
