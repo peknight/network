@@ -4,7 +4,7 @@ import cats.Show
 import cats.data.StateT
 import cats.syntax.either.*
 import com.comcast.ip4s.*
-import com.peknight.cats.ext.instances.eitherT.eitherTMonad
+import com.peknight.cats.instances.eitherT.eitherTMonad
 import com.peknight.error.Error
 import com.peknight.error.syntax.either.value
 import com.peknight.socks.SocksVersion.socks5

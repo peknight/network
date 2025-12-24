@@ -9,9 +9,9 @@ import cats.syntax.functor.*
 import cats.syntax.monadError.*
 import cats.syntax.option.*
 import com.comcast.ip4s.{Ipv4Address, Ipv6Address, Port}
-import com.peknight.fs2.ext.pipe.scanS
-import com.peknight.http4s.ext.uri.host.fromString
-import com.peknight.http4s.ext.uri.scheme.{ws, wss}
+import com.peknight.fs2.pipe.scanS
+import com.peknight.http4s.uri.host.fromString
+import com.peknight.http4s.uri.scheme.{ws, wss}
 import fs2.{Pipe, Stream}
 import org.http4s.*
 import org.http4s.Method.HEAD

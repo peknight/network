@@ -6,8 +6,8 @@ commonSettings
 lazy val network = (project in file("."))
   .settings(name := "network")
   .aggregate(
-    socks,
     proxy,
+    socks,
   )
 
 lazy val proxy = (project in file("proxy"))
@@ -26,8 +26,8 @@ lazy val reverseProxy = (project in file("proxy/reverse"))
 lazy val reverseProxyHttp4s = (crossProject(JVMPlatform, JSPlatform) in file("proxy/reverse/http4s"))
   .settings(name := "reverse-proxy-http4s")
   .settings(crossDependencies(
-    peknight.ext.http4s,
-    peknight.ext.fs2,
+    peknight.http4s,
+    peknight.fs2,
     http4s.client,
     http4s.server,
   ))
@@ -61,7 +61,7 @@ lazy val socks5Core = (crossProject(JVMPlatform, JSPlatform) in file("socks/sock
   .settings(name := "socks5-core")
   .settings(crossDependencies(
     fs2,
-    comcast.ip4s
+    comcast.ip4s,
   ))
 
 lazy val socks5Api = (crossProject(JVMPlatform, JSPlatform) in file("socks/socks5/api"))
@@ -79,7 +79,7 @@ lazy val socks5Server = (project in file("socks/socks5/server"))
 lazy val socks5ServerCore = (crossProject(JVMPlatform, JSPlatform) in file("socks/socks5/server/core"))
   .dependsOn(socks5Api)
   .settings(name := "socks5-server-core")
-  .settings(crossDependencies(peknight.ext.cats))
+  .settings(crossDependencies(peknight.cats))
 
 lazy val socks5Client = (project in file("socks/socks5/client"))
   .settings(name := "socks5-client")

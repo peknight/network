@@ -2,8 +2,8 @@ package com.peknight.proxy.reverse.http4s
 
 import cats.effect.{Concurrent, Resource}
 import com.comcast.ip4s.{Host, Port}
-import com.peknight.http4s.ext.syntax.request.getUri
-import com.peknight.http4s.ext.syntax.uri.withAuthority
+import com.peknight.http4s.syntax.request.getUri
+import com.peknight.http4s.syntax.uri.withAuthority
 import org.http4s.client.Client
 import org.http4s.client.websocket.WSClient
 import org.http4s.headers.Forwarded

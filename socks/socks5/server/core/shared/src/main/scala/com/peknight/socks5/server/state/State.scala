@@ -1,7 +1,7 @@
 package com.peknight.socks5.server.state
 
 import cats.data.StateT
-import com.peknight.cats.ext.instances.eitherT.eitherTMonad
+import com.peknight.cats.instances.eitherT.eitherTMonad
 import com.peknight.error.Error
 import fs2.{Pull, Stream}
 
