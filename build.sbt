@@ -6,9 +6,17 @@ commonSettings
 lazy val network = (project in file("."))
   .settings(name := "network")
   .aggregate(
+    networkCore.jvm,
+    networkCore.js,
     proxy,
     socks,
   )
+
+lazy val networkCore = (crossProject(JVMPlatform, JSPlatform) in file("network-core"))
+  .settings(name := "network-core")
+  .settings(crossDependencies(
+    peknight.codec,
+  ))
 
 lazy val proxy = (project in file("proxy"))
   .settings(name := "proxy")
