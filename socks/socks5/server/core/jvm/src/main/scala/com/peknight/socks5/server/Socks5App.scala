@@ -14,18 +14,13 @@ import scodec.bits.ByteVector
 object Socks5App extends IOApp.Simple:
 
   def server[F[_]: {Concurrent, Network, Console}]: F[Unit] =
-    Network[F].server(port = Some(port"1088"))
+    Network[F].bindAndAccept(SocketAddress.port(port"1088"))
       .evalMap { client =>
-        Network[F].client(SocketAddress(host"127.0.0.1", port"1080"))
+        Network[F].connect(SocketAddress(host"127.0.0.1", port"1080"))
           .allocated
-          .flatTap { (target, _) =>
-            for
-              ports <- ports(client, target)
-              _ <- Console[F].println(s"$ports connected")
-            yield
-              ()
-          }
-          .flatMap((target, release) => ports(client, target).map(ports =>
+          .flatTap((target, _) => Console[F].println(s"${showPorts(client, target)} connected"))
+          .map { (target, release) =>
+            val ports = showPorts(client, target)
             Stream(
               client.reads
                 .through(hex.encode[F])
@@ -43,17 +38,13 @@ object Socks5App extends IOApp.Simple:
                 _ <- Console[F].println(s"$ports released")
               yield
                 ()
-            })
-          )
+            }
+          }
       }
       .parJoin(100).compile.drain
 
-  def ports[F[_]: Monad](client: Socket[F], target: Socket[F]): F[String] =
-    for
-      clientRemoteAddress <- client.remoteAddress
-      targetLocalAddress <- target.localAddress
-    yield
-      s"${clientRemoteAddress.port} -> ${targetLocalAddress.port}"
+  def showPorts[F[_]: Monad](client: Socket[F], target: Socket[F]): String =
+    s"${client.peerAddress.asIpUnsafe} -> ${target.address.asIpUnsafe}"
 
   val run: IO[Unit] =
     for
