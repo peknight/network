@@ -81,10 +81,10 @@ trait ReverseProxy:
               .removeHeader(ci"Sec-WebSocket-Extensions")
               .headers
             val wsRequest = WSRequest(request.uri.copy(scheme = Some(scheme)), headers, request.method)
-            wsClientR.flatMap(_.connect(wsRequest)).allocated.flatMap{ (connection, release) =>
+            wsClientR.flatMap(_.connect(wsRequest)).allocated.flatMap { (connection, release) =>
               for
-                resp <- webSocketBuilder.build(webSocketFramePipe(connection))
-                response <- handleResponse(req, resp, release, contentLocationF, locationF, responseF)
+                resp <- webSocketBuilder.build(webSocketFramePipe(connection, release))
+                response <- handleResponse(req, resp, ().pure[F], contentLocationF, locationF, responseF)
               yield
                 response
             }
@@ -183,7 +183,7 @@ trait ReverseProxy:
     yield
       response
 
-  private def webSocketFramePipe[F[_]: Concurrent](connection: WSConnection[F]): Pipe[F, WebSocketFrame, WebSocketFrame] =
+  private def webSocketFramePipe[F[_]: Concurrent](connection: WSConnection[F], release: F[Unit]): Pipe[F, WebSocketFrame, WebSocketFrame] =
     in => Stream(
       in.through(scanS[F, WebSocketFrame, WebSocketFrame, WSFrame, Boolean](true) {
         case (last, frame: WebSocketFrame.Close) =>
@@ -229,7 +229,7 @@ trait ReverseProxy:
           println(s"WebSocket|receive|binary|${data.toHex}|$last")
           WebSocketFrame.Binary(data, last).pure[F]
       }.map(_.some)
-    ).parJoin(2).collect { case Some(frame) => frame }
+    ).parJoin(2).onFinalize(release).collect { case Some(frame) => frame }
 
   extension [A] (option: Option[A])
     private def mapUri[F[_]](request: Request[F])(f: PartialFunction[Request[F], Uri])(get: A => Uri)(update: (A, Uri) => A): Option[A] =
