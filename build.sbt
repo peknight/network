@@ -3,8 +3,9 @@ import com.peknight.build.sbt.*
 
 commonSettings
 
-lazy val network = (project in file("."))
+lazy val network = rootProject
   .settings(name := "network")
+  .settings(publish / skip := true)
   .aggregate(networkCore.projectRefs *)
   .aggregate(proxy)
   .aggregate(socks)
