@@ -18,6 +18,7 @@ trait HostReverseProxy:
   def scheme: Option[Uri.Scheme] = None
   def wsScheme: Option[Uri.Scheme] = None
   def proxyScheme: Option[Uri.Scheme] = None
+  def preserveHost: Boolean = true
   def overwriteReferrer: Boolean = false
   def requestUriF: PartialFunction[Uri, Uri] =
     uriF(proxyHost, host, port, scheme)
