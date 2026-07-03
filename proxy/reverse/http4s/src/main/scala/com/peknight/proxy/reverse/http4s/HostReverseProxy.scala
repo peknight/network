@@ -40,5 +40,6 @@ trait HostReverseProxy:
                                webSocketBuilder: WebSocketBuilder[F],
                                forwardedBy: Option[Forwarded.Node] = None
                              ): HttpRoutes[F] =
-    ReverseProxy.uri[F](clientR, wsClientR, webSocketBuilder, proxyScheme, wsScheme, forwardedBy, overwriteReferrer)(requestF)(responseF)
+    ReverseProxy.uri[F](clientR, wsClientR, webSocketBuilder, proxyScheme, wsScheme, forwardedBy, preserveHost,
+      overwriteReferrer)(requestF)(responseF)
 end HostReverseProxy
