@@ -35,7 +35,7 @@ trait ReverseProxy:
                            )(f: PartialFunction[Request[F], Uri])(g: PartialFunction[Request[F], Uri]): HttpRoutes[F] =
     apply[F](clientR, wsClientR, webSocketBuilder, req => f.isDefinedAt(req), scheme, wsScheme, forwardedBy,
       req => f(req).pure[F],
-      (uri, req) => uri.host.map(host => Host(host.value, uri.authority.flatMap(_.port))).pure[F],
+      (uri, req) => req.uri.host.map(host => Host(host.value, req.uri.authority.flatMap(_.port))).pure[F],
       (uri, req) =>
         if overwriteReferrer then
           req.headers.get[Referer].mapUri(req)(f)(_.uri)((referrer, uri) => referrer.copy(uri = uri)).pure[F]
@@ -105,7 +105,7 @@ trait ReverseProxy:
                                          requestF: Request[F] => F[Request[F]]): F[Request[F]] =
     for
       uri <- uriF(req)
-      host <- hostF(req.uri, req)
+      host <- hostF(uri, req)
       referrer <- referrerF(uri, req)
       scheme = req.uri.scheme.orElse(schemeOption)
       forwardedElem = forwardedElement(req, forwardedBy, scheme)
