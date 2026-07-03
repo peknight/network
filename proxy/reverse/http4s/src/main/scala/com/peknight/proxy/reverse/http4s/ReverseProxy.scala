@@ -105,7 +105,7 @@ trait ReverseProxy:
                                          requestF: Request[F] => F[Request[F]]): F[Request[F]] =
     for
       uri <- uriF(req)
-      host <- hostF(uri, req)
+      host <- hostF(req.uri, req)
       referrer <- referrerF(uri, req)
       scheme = req.uri.scheme.orElse(schemeOption)
       forwardedElem = forwardedElement(req, forwardedBy, scheme)
