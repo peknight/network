@@ -78,7 +78,10 @@ lazy val socks5Server = (project in file("socks/socks5/server"))
 lazy val socks5ServerCore = (projectMatrix in file("socks/socks5/server/core"))
   .dependsOn(socks5Api)
   .settings(name := "socks5-server-core")
-  .settings(libraryDependencies ++= dependencies(peknight.cats))
+  .settings(libraryDependencies ++= dependencies(
+    peknight.cats,
+    peknight.fs2,
+  ))
   .jvmPlatform(scalaVersions = Seq(scala.scala3.version))
   .jsPlatform(scalaVersions = Seq(scala.scala3.version))
 

@@ -1,12 +1,12 @@
 package com.peknight.socks5.server
 
-import cats.Show
-import cats.data.StateT
 import cats.syntax.either.*
+import cats.syntax.functor.*
 import com.comcast.ip4s.*
-import com.peknight.cats.instances.eitherT.eitherTMonad
 import com.peknight.error.Error
 import com.peknight.error.syntax.either.value
+import com.peknight.fs2.pull.state.BytePullState
+import com.peknight.fs2.pull.state.BytePullState.attempt
 import com.peknight.socks.SocksVersion.socks5
 import com.peknight.socks.error.UnsupportedSocksVersion
 import com.peknight.socks5.*
@@ -16,223 +16,163 @@ import com.peknight.socks5.auth.password.PasswordVersion.version1
 import com.peknight.socks5.auth.password.Status.{Failure, Success}
 import com.peknight.socks5.auth.password.{Status, UsernamePassword as UPassword}
 import com.peknight.socks5.error.*
-import com.peknight.socks5.server.state.State
 import fs2.io.net.Socket
-import fs2.{Chunk, Pull, Stream}
+import fs2.{Chunk, Pull, RaiseThrowable}
 import scodec.bits.ByteVector
 
 import java.nio.charset.Charset
 
 package object state:
-  type State[F[_], O, A] = StateT[[X] =>> Pull[F, O, Either[Error, X]], Stream[F, Byte], A]
+  type State[F[_], A] = BytePullState[F, Byte, A]
 
-  private def negotiation[F[_]](socket: Socket[F])(f: (List[Method], Socket[F]) => F[Method])
-  : State[F, Stream[F, Byte], AcceptableMethod] =
-    val state: State[F, Nothing, AcceptableMethod] =
+  private def negotiation[F[_]: RaiseThrowable](f: List[Method] => F[Method]): State[F, AcceptableMethod] =
+    val state: State[F, AcceptableMethod] =
       for
-        _ <- readSocks5Version[F, Nothing]
-        chunk <- readSizedChunk[F, Nothing](MethodEmpty)
-        methods = chunk.map(Method.apply).toList
-        selected <- liftF[F, Nothing, AcceptableMethod](Pull.eval(f(methods, socket)).map {
-          case NoAcceptableMethod => NoAcceptableMethod.asLeft
-          case selected: AcceptableMethod => selected.asRight
+        _ <- readSocks5Version[F]
+        methods <- readMethods[F]
+        selected <- BytePullState.liftP[F, Byte, AcceptableMethod](Pull.eval(f(methods)).flatMap {
+          case NoAcceptableMethod => Pull.raiseError(NoAcceptableMethod)
+          case selected: AcceptableMethod => Pull.pure(selected)
         })
       yield
         selected
-    State[F, Stream[F, Byte], AcceptableMethod](stream => state.run(stream).flatMap {
-      case r@Right((stream, selected)) => Pull.output1(Stream(socks5.code, selected.code)) >> Pull.pure(r)
-      case l@Left(error) => Pull.output1(Stream(socks5.code, NoAcceptableMethod.code)) >> Pull.pure(l)
-    })
+    state.attempt.flatMap {
+      case Right(selected) =>
+        BytePullState.output(socks5.code, selected.code).as(selected)
+      case Left(error) =>
+        BytePullState.output(socks5.code, NoAcceptableMethod.code).flatMap(_ => BytePullState.raiseError(error))
+    }
 
-  private def authentication[F[_]](method: AcceptableMethod, socket: Socket[F])
-                                  (password: (UPassword, Socket[F]) => F[Status])
-                                  (using Charset): State[F, Stream[F, Byte], Unit] =
+  private def authentication[F[_]](method: AcceptableMethod)(password: UPassword => F[Status])
+                                  (using Charset)(using RaiseThrowable[F]): State[F, Unit] =
     method match
-      case NoAuthenticationRequired => unit
-      case GSSAPI => liftEither(UnsupportedMethod(method).asLeft)
-      case UsernamePassword => passwordAuth(socket)(password)
-      case method@IANAAssigned(code) => liftEither(UnsupportedMethod(method).asLeft)
-      case method@PrivateMethod(code) => liftEither(UnsupportedMethod(method).asLeft)
+      case NoAuthenticationRequired => BytePullState.unit
+      case GSSAPI => BytePullState.raiseError(UnsupportedMethod(method))
+      case UsernamePassword => passwordAuth(password)
+      case method@IANAAssigned(code) => BytePullState.raiseError(UnsupportedMethod(method))
+      case method@PrivateMethod(code) => BytePullState.raiseError(UnsupportedMethod(method))
 
-  private def passwordAuth[F[_]](socket: Socket[F])(f: (UPassword, Socket[F]) => F[Status])(using Charset)
-  : State[F, Stream[F, Byte], Unit] =
-    val state: State[F, Nothing, Unit] =
+  private def passwordAuth[F[_], O](f: UPassword => F[Status])(using Charset)(using RaiseThrowable[F]): State[F, Unit] =
+    val state: State[F, Unit] =
       for
-        _ <- readPasswordVersion[F, Nothing]
-        username <- readSizedString[F, Nothing](UsernameEmpty)
-        password <- readSizedString[F, Nothing](PasswordEmpty)
-        _ <- liftF[F, Nothing, Unit](Pull.eval(f(UPassword(username, password), socket)).map {
-          case Success => ().asRight
-          case f@Failure(code) => f.asLeft
+        _ <- readPasswordVersion[F]
+        username <- BytePullState.readSizedString[F, Byte](UsernameEmpty)
+        password <- BytePullState.readSizedString[F, Byte](PasswordEmpty)
+        _ <- BytePullState.liftP[F, Byte, Unit](Pull.eval(f(UPassword(username, password))).flatMap {
+          case Success => Pull.pure(())
+          case f@Failure(code) => Pull.raiseError(f)
         })
       yield
         ()
-    State[F, Stream[F, Byte], Unit](stream => state.run(stream).flatMap {
-      case r@Right((stream, _)) => Pull.output1(Stream(version1.code, Success.code)) >> Pull.pure(r)
-      case l@Left(Failure(code)) => Pull.output1(Stream(version1.code, code)) >> Pull.pure(l)
-      case l@Left(error) => Pull.output1(Stream(version1.code, Failure.code)) >> Pull.pure(l)
-    })
+    state.attempt.flatMap {
+      case Right(_) => BytePullState.output(version1.code, Success.code)
+      case Left(f@Failure(code)) => BytePullState.output(version1.code, code).flatMap(_ => BytePullState.raiseError(f))
+      case Left(e@error) => BytePullState.output(version1.code, Failure.code).flatMap(_ => BytePullState.raiseError(e))
+    }
 
-  private def request[F[_]](socket: Socket[F])(f: (Request, Socket[F]) => F[Response])(using Charset)
-  : State[F, Stream[F, Byte], Response] =
-    val state: State[F, Nothing, Response] =
+  private def request[F[_]](f: Request => F[Response])(using Charset)(using RaiseThrowable[F]): State[F, Response] =
+    val state: State[F, (Response, Chunk[Byte])] =
       for
-        _ <- readSocks5Version[F, Nothing]
-        command <- readCommand[F, Nothing]
-        _ <- readReserved[F, Nothing]
-        address <- readAddress[F, Nothing]
-        port <- readPort[F, Nothing]
-        response <- liftF[F, Nothing, Response](Pull.eval(f(Request(command, address, port), socket)).map(_.asRight))
+        _ <- readSocks5Version[F]
+        command <- readCommand[F]
+        _ <- readReserved[F]
+        address <- readAddress[F]
+        port <- readPort[F]
+        response <- BytePullState.liftF[F, Byte, Response](f(Request(command, address, port)))
+        addressBytes <- BytePullState.liftE[F, Byte, Chunk[Byte]](encodeAddress(response.address))
       yield
-        response
-    State[F, Stream[F, Byte], Response](stream => state.run(stream).flatMap { either =>
-      val next =
+        (response, addressBytes)
+    state.attempt.flatMap {
+      case Right((response, addressBytes)) =>
+        val addressTypeCode = AddressType.fromHost(response.address).code
         for
-          (stream, response) <- either
-          addressBytes <- writeAddress[F](response.address)
+          _ <- BytePullState.output(socks5.code, response.reply.code, Reserved.code, addressTypeCode)
+          _ <- BytePullState.output(addressBytes)
+          _ <- BytePullState.output(encodePort(response.port))
         yield
-          (stream, response, addressBytes)
-      next match
-        case Right((stream, response, addressBytes)) =>
-          val addressTypeCode = AddressType.fromHost(response.address).code
-          Pull.output1(Stream(socks5.code, response.reply.code, Reserved.code, addressTypeCode)
-            .append(addressBytes).append(writePort(response.port))) >>
-            Pull.pure((stream, response).asRight)
-        case Left(error) =>
-          Pull.output1(Stream(socks5.code, Reply.fromError(error).code, Reserved.code, AddressType.Ipv4Address.code)
-            .append(writeIpAddress(ipv4"0.0.0.0")).append(writePort(port"0"))) >>
-            Pull.pure(error.asLeft)
-    })
+          response
+      case Left(error) =>
+        for
+          _ <- BytePullState.output(socks5.code, Reply.fromError(error).code, Reserved.code, AddressType.Ipv4Address.code)
+          _ <- BytePullState.output(encodeIpAddress(ipv4"0.0.0.0"))
+          _ <- BytePullState.output(encodePort(port"0"))
+          res <- BytePullState.raiseError[F, Byte, Response](error)
+        yield
+          res
+    }
 
-  private def readSocks5Version[F[_], O]: State[F, O, Unit] =
-    for
-      version <- read1[F, O](Socks5VersionEmpty)
-      _ <- liftEither[F, O, Unit] {
-        if version == socks5.code then ().asRight
-        else UnsupportedSocksVersion(version).asLeft
-      }
-    yield
-      ()
+  private def readSocks5Version[F[_]: RaiseThrowable]: State[F, Unit] =
+    BytePullState.parse1[F, Byte, Unit](version =>
+      if version == socks5.code then ().asRight
+      else UnsupportedSocksVersion(version).asLeft
+    )(Socks5VersionEmpty)
 
-  private def readPasswordVersion[F[_], O]: State[F, O, Unit] =
-    for
-      version <- read1[F, O](PasswordVersionEmpty)
-      _ <- liftEither[F, O, Unit] {
-        if version == version1.code then ().asRight
-        else UnsupportedPasswordVersion(version).asLeft
-      }
-    yield
-      ()
+  private def readMethods[F[_]: RaiseThrowable]: State[F, List[Method]] =
+    BytePullState.mapSizedBytes[F, Byte, List[Method]](_.map(Method.apply).toList)(MethodEmpty)
 
-  private def readCommand[F[_], O]: State[F, O, Command] =
-    for
-      cmd <- read1[F, O](CommandEmpty)
-      cmd <- liftEither[F, O, Command](Command.values.find(_.code == cmd).toRight(UnsupportedCommand(cmd)))
-    yield
-      cmd
+  private def readPasswordVersion[F[_]: RaiseThrowable]: State[F, Unit] =
+    BytePullState.parse1[F, Byte, Unit](version =>
+      if version == version1.code then ().asRight
+      else UnsupportedPasswordVersion(version).asLeft
+    )(PasswordVersionEmpty)
 
-  private def readReserved[F[_], O]: State[F, O, Unit] =
-    for
-      rsv <- read1[F, O](ReservedEmpty)
-      _ <- liftEither[F, O, Unit](
-        if rsv == Reserved.code then ().asRight else UnsupportedReserved(rsv).asLeft
-      )
-    yield
-      ()
+  private def readCommand[F[_]: RaiseThrowable]: State[F, Command] =
+    BytePullState.parse1[F, Byte, Command](cmd =>
+      Command.values.find(_.code == cmd).toRight(UnsupportedCommand(cmd))
+    )(CommandEmpty)
 
-  private def readAddress[F[_], O](using Charset): State[F, O, Host] =
+  private def readReserved[F[_]: RaiseThrowable]: State[F, Unit] =
+    BytePullState.parse1[F, Byte, Unit](rsv =>
+      if rsv == Reserved.code then ().asRight
+      else UnsupportedReserved(rsv).asLeft
+    )(ReservedEmpty)
+
+  private def readAddress[F[_]](using Charset)(using RaiseThrowable[F]): State[F, Host] =
     for
-      addressType <- readAddressType[F, O]
+      addressType <- readAddressType[F]
       address <- addressType match
-        case AddressType.Ipv4Address => readIpv4Address[F, O]
-        case AddressType.DomainName => readDomainName[F, O]
-        case AddressType.Ipv6Address => readIpv6Address[F, O]
+        case AddressType.Ipv4Address => readIpv4Address[F]
+        case AddressType.DomainName => readDomainName[F]
+        case AddressType.Ipv6Address => readIpv6Address[F]
     yield
       address
 
-  private def readAddressType[F[_], O]: State[F, O, AddressType] =
-    for
-      code <- read1[F, O](AddressTypeEmpty)
-      addressType <- liftEither[F, O, AddressType](
-        AddressType.values.find(_.code == code).toRight(UnsupportedAddressType(code))
-      )
-    yield
-      addressType
+  private def readAddressType[F[_]: RaiseThrowable]: State[F, AddressType] =
+    BytePullState.parse1[F, Byte, AddressType](code =>
+      AddressType.values.find(_.code == code).toRight(UnsupportedAddressType(code))
+    )(AddressTypeEmpty)
 
-  private def readIpv4Address[F[_], O]: State[F, O, Ipv4Address] =
-    for
-      chunk <- readLimit[F, O](4, Ipv4AddressEmpty)
-      ipv4Address <- liftEither[F, O, Ipv4Address](
-        Ipv4Address.fromBytes(chunk.toArray).toRight(IllegalIpv4Address(chunk.toByteVector))
-      )
-    yield
-      ipv4Address
+  private def readIpv4Address[F[_]: RaiseThrowable]: State[F, Ipv4Address] =
+    BytePullState.parseChunk[F, Byte, Ipv4Address](_.unconsN(4))(chunk =>
+      Ipv4Address.fromBytes(chunk.toArray).toRight(IllegalIpv4Address(chunk.toByteVector))
+    )(Ipv4AddressEmpty)
 
-  private def readDomainName[F[_], O](using Charset): State[F, O, Hostname] =
-    for
-      domainName <- readSizedString[F, O](DomainNameEmpty)
-      domainName <- liftEither[F, O, Hostname](Hostname.fromString(domainName).toRight(IllegalDomainName(domainName)))
-    yield
-      domainName
+  private def readDomainName[F[_]](using Charset)(using RaiseThrowable[F]): State[F, Hostname] =
+    BytePullState.parseSizedString[F, Byte, Hostname](domainName =>
+      Hostname.fromString(domainName).toRight(IllegalDomainName(domainName))
+    )(DomainNameEmpty)
 
-  private def readIpv6Address[F[_], O]: State[F, O, Ipv6Address] =
-    for
-      chunk <- readLimit[F, O](16, Ipv6AddressEmpty)
-      ipv6Address <- liftEither[F, O, Ipv6Address](
-        Ipv6Address.fromBytes(chunk.toArray).toRight(IllegalIpv6Address(chunk.toByteVector))
-      )
-    yield
-      ipv6Address
+  private def readIpv6Address[F[_]: RaiseThrowable]: State[F, Ipv6Address] =
+    BytePullState.parseChunk[F, Byte, Ipv6Address](_.unconsN(16))(chunk =>
+      Ipv6Address.fromBytes(chunk.toArray).toRight(IllegalIpv6Address(chunk.toByteVector))
+    )(Ipv6AddressEmpty)
 
-  private def writeAddress[F[_]](host: Host)(using Charset): Either[Error, Stream[F, Byte]] =
+  private def readPort[F[_]: RaiseThrowable]: State[F, Port] =
+    BytePullState.parseChunk[F, Byte, Port](_.unconsN(2)) { chunk =>
+      val port = chunk.toByteVector.toInt()
+      Port.fromInt(port).toRight(IllegalPort(port))
+    }(PortEmpty)
+
+  private def encodeAddress(host: Host)(using Charset): Either[Error, Chunk[Byte]] =
     host match
-      case ipAddress: IpAddress => writeIpAddress(ipAddress).asRight
-      case host => writeHost(host)
+      case ipAddress: IpAddress => encodeIpAddress(ipAddress).asRight
+      case host => encodeHost(host)
 
-  private def writeIpAddress[F[_]](ipAddress: IpAddress): Stream[F, Byte] =
-    Stream(ipAddress.toBytes*)
+  private def encodeIpAddress(ipAddress: IpAddress): Chunk[Byte] = Chunk.array(ipAddress.toBytes)
 
-  private def writeHost[F[_]](host: Host)(using Charset): Either[Error, Stream[F, Byte]] =
-    ByteVector.encodeString(host.toString).value(host)
-      .map(bytes => Stream.chunk(Chunk.byteVector(bytes.length.toByte +: bytes)))
+  private def encodeHost(host: Host)(using Charset): Either[Error, Chunk[Byte]] =
+    ByteVector.encodeString(host.toString).value(host).map(bytes => Chunk.byteVector(bytes.length.toByte +: bytes))
 
-  private def readPort[F[_], O]: State[F, O, Port] =
-    for
-      chunk <- readLimit[F, O](2, PortEmpty)
-      port <- liftEither[F, O, Port] {
-        val port = chunk.toByteVector.toInt()
-        Port.fromInt(port).toRight(IllegalPort(port))
-      }
-    yield
-      port
+  private def encodePort(port: Port): Chunk[Byte] = Chunk.byteVector(ByteVector.fromInt(port.value, 2))
 
-  private def writePort[F[_]](port: Port): Stream[F, Byte] =
-    Stream.chunk(Chunk.byteVector(ByteVector.fromInt(port.value, 2)))
-
-  private def readSizedString[F[_], O](onEmpty: => Error)(using Charset): State[F, O, String] =
-    for
-      chunk <- readSizedChunk[F, O](onEmpty)
-      bytes = chunk.toByteVector
-      value <- liftEither[F, O, String](bytes.decodeString.value(bytes)(using Show.show(_.toHex)))
-    yield
-      value
-
-  private def readSizedChunk[F[_], O](onEmpty: => Error): State[F, O, Chunk[Byte]] =
-    for
-      n <- read1[F, O](onEmpty)
-      chunk <- readLimit[F, O](n, onEmpty)
-    yield
-      chunk
-
-  private def read1[F[_], O](onEmpty: => Error): State[F, O, Byte] =
-    State(_.pull.uncons1.map(_.toRight(onEmpty).map(_.swap)))
-
-  private def readLimit[F[_], O](n: Int, onEmpty: => Error): State[F, O, Chunk[Byte]] =
-    State(_.pull.unconsLimit(n).map(_.toRight(onEmpty).map(_.swap)))
-
-  private def liftEither[F[_], O, A](either: Either[Error, A]): State[F, O, A] = StateT.liftF(Pull.pure(either))
-
-  private def liftF[F[_], O, A](f: Pull[F, O, Either[Error, A]]): State[F, O, A] = StateT.liftF(f)
-
-  private def unit[F[_], O]: State[F, O, Unit] = StateT.pure(())
 end state
