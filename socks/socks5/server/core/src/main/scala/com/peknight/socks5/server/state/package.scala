@@ -17,7 +17,6 @@ import com.peknight.socks5.auth.password.PasswordVersion.version1
 import com.peknight.socks5.auth.password.Status.{Failure, Success}
 import com.peknight.socks5.auth.password.{Status, UsernamePassword as UPassword}
 import com.peknight.socks5.error.*
-import fs2.io.net.Socket
 import fs2.{Chunk, Pull, RaiseThrowable}
 import scodec.bits.ByteVector
 
