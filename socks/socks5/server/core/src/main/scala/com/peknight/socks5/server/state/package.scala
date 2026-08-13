@@ -7,6 +7,7 @@ import com.peknight.error.Error
 import com.peknight.error.syntax.either.value
 import com.peknight.fs2.pull.state.BytePullState
 import com.peknight.fs2.pull.state.BytePullState.attempt
+import com.peknight.socks.SocksVersion
 import com.peknight.socks.SocksVersion.socks5
 import com.peknight.socks.error.UnsupportedSocksVersion
 import com.peknight.socks5.*
@@ -96,14 +97,14 @@ package object state:
           _ <- BytePullState.output(socks5.code, Reply.fromError(error).code, Reserved.code, AddressType.Ipv4Address.code)
           _ <- BytePullState.output(encodeIpAddress(ipv4"0.0.0.0"))
           _ <- BytePullState.output(encodePort(port"0"))
-          res <- BytePullState.raiseError[F, Byte, Response](error)
+          response <- BytePullState.raiseError[F, Byte, Response](error)
         yield
-          res
+          response
     }
 
-  private def readSocks5Version[F[_]: RaiseThrowable]: State[F, Unit] =
-    BytePullState.parse1[F, Byte, Unit](version =>
-      if version == socks5.code then ().asRight
+  private def readSocks5Version[F[_]: RaiseThrowable]: State[F, SocksVersion] =
+    BytePullState.parse1[F, Byte, SocksVersion](version =>
+      if version == socks5.code then socks5.asRight
       else UnsupportedSocksVersion(version).asLeft
     )(Socks5VersionEmpty)
 
