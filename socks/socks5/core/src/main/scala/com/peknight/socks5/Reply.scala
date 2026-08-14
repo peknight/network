@@ -4,7 +4,7 @@ import com.peknight.error.Error
 import com.peknight.socks.error.SocksError
 import com.peknight.socks5.error.{UnsupportedAddressType, UnsupportedCommand}
 
-sealed trait Reply:
+sealed trait Reply derives CanEqual:
   def code: Byte
   def success: Boolean
 end Reply

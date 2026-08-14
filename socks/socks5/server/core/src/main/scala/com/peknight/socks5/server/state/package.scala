@@ -11,12 +11,15 @@ import com.peknight.socks.SocksVersion
 import com.peknight.socks.SocksVersion.socks5
 import com.peknight.socks.error.UnsupportedSocksVersion
 import com.peknight.socks5.*
+import com.peknight.socks5.Command.{BIND, CONNECT, UDP_ASSOCIATE}
+import com.peknight.socks5.api.{ConnectionContext, Socks5Api}
 import com.peknight.socks5.auth.Method
 import com.peknight.socks5.auth.Method.*
 import com.peknight.socks5.auth.password.PasswordVersion.version1
 import com.peknight.socks5.auth.password.Status.{Failure, Success}
 import com.peknight.socks5.auth.password.{Status, UsernamePassword as UPassword}
 import com.peknight.socks5.error.*
+import fs2.io.net.Socket
 import fs2.{Pull, RaiseThrowable}
 import scodec.bits.ByteVector
 
@@ -25,17 +28,29 @@ import java.nio.charset.Charset
 package object state:
   type State[F[_], A] = BytePullState[F, Byte, A]
 
-  private def negotiation[F[_]: RaiseThrowable](f: List[Method] => F[Method]): State[F, AcceptableMethod] =
+  def handle[F[_]](api: Socks5Api[F], socket: Socket[F])(using Charset)(using RaiseThrowable[F]): F[Unit] =
+    val ctx = ConnectionContext(socket.address, socket.peerAddress)
+    val state =
+      for
+        acceptableMethod <- negotiation[F](method => api.negotiation(method, ctx))
+        _ <- authentication[F](acceptableMethod)(password => api.passwordAuth(password, ctx))
+        response <- request[F](request => api.connect(request, ctx))
+      yield
+        ???
+    ???
+
+
+  def negotiation[F[_]: RaiseThrowable](f: List[Method] => F[Method]): State[F, AcceptableMethod] =
     readNegotiation[F]
       .flatMap(methods => BytePullState.liftF[F, Byte, Method](f(methods)))
       .flatMap {
         case NoAcceptableMethod => BytePullState.raiseError[F, Byte, AcceptableMethod](NoAcceptableMethod)
         case selected: AcceptableMethod => BytePullState.pure(selected)
       }
-      .outputBytesE(either => writeNegotiation(either.toOption))
+      .outputBytesE(either => writeSelected(either.toOption))
 
-  private def authentication[F[_]](method: AcceptableMethod)(password: UPassword => F[Status])
-                                  (using Charset)(using RaiseThrowable[F]): State[F, Unit] =
+  def authentication[F[_]](method: AcceptableMethod)(password: UPassword => F[Status])(using Charset)
+                          (using RaiseThrowable[F]): State[F, Unit] =
     method match
       case NoAuthenticationRequired => BytePullState.unit
       case GSSAPI => BytePullState.raiseError(UnsupportedMethod(method))
@@ -50,17 +65,23 @@ package object state:
         case s@Success => BytePullState.pure[F, Byte, Status](s)
         case f@Failure(code) => BytePullState.raiseError(f)
       }
-      .outputBytesE(writePasswordAuth)
+      .outputBytesE(writeStatus)
 
-  private def request[F[_]](f: Request => F[Response])(using Charset)(using RaiseThrowable[F]): State[F, Response] =
+  def request[F[_]](connect: Request => F[Response])(using Charset)(using RaiseThrowable[F]): State[F, Response] =
     val state: State[F, (Response, ByteVector)] =
       for
         request <- readRequest[F]
-        response <- BytePullState.liftF[F, Byte, Response](f(request))
+        response <- request.command match
+          case CONNECT =>
+            BytePullState.liftF[F, Byte, Response](connect(request)).flatMap(response =>
+              if response.reply.success then BytePullState.pure[F, Byte, Response](response)
+              else BytePullState.raiseError(Error(response.reply)))
+          case BIND => BytePullState.raiseError(UnsupportedCommand(request.command.code))
+          case UDP_ASSOCIATE => BytePullState.raiseError(UnsupportedCommand(request.command.code))
         addressBytes <- BytePullState.liftE[F, Byte, ByteVector](writeAddress(response.address))
       yield
         (response, addressBytes)
-    state.outputBytesE(writeRequest).map(_._1)
+    state.outputBytesE(writeResponse).map(_._1)
 
   private def readNegotiation[F[_]: RaiseThrowable]: State[F, List[Method]] =
     for
@@ -149,18 +170,18 @@ package object state:
       Port.fromInt(port).toRight(IllegalPort(port))
     }(PortEmpty)
 
-  private def writeNegotiation(selected: Option[AcceptableMethod]): ByteVector =
+  private def writeSelected(selected: Option[AcceptableMethod]): ByteVector =
     selected match
       case Some(selected) => ByteVector(socks5.code, selected.code)
       case None => ByteVector(socks5.code, NoAcceptableMethod.code)
 
-  private def writePasswordAuth(either: Either[Throwable, Status]): ByteVector =
+  private def writeStatus(either: Either[Throwable, Status]): ByteVector =
     either match
       case Right(_) => ByteVector(version1.code, Success.code)
       case Left(f@Failure(code)) => ByteVector(version1.code, code)
       case Left(error) => ByteVector(version1.code, Failure.code)
 
-  private def writeRequest(either: Either[Throwable, (Response, ByteVector)]): ByteVector =
+  private def writeResponse(either: Either[Throwable, (Response, ByteVector)]): ByteVector =
     either match
       case Right((response, addressBytes)) =>
         val addressTypeCode = AddressType.fromHost(response.address).code
