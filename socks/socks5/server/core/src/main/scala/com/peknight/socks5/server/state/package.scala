@@ -6,7 +6,7 @@ import com.comcast.ip4s.*
 import com.peknight.error.Error
 import com.peknight.error.syntax.either.value
 import com.peknight.fs2.pull.state.BytePullState
-import com.peknight.fs2.pull.state.BytePullState.{attempt, outputBytesE}
+import com.peknight.fs2.pull.state.BytePullState.outputBytesE
 import com.peknight.socks.SocksVersion
 import com.peknight.socks.SocksVersion.socks5
 import com.peknight.socks.error.UnsupportedSocksVersion
@@ -17,7 +17,7 @@ import com.peknight.socks5.auth.password.PasswordVersion.version1
 import com.peknight.socks5.auth.password.Status.{Failure, Success}
 import com.peknight.socks5.auth.password.{Status, UsernamePassword as UPassword}
 import com.peknight.socks5.error.*
-import fs2.{Chunk, Pull, RaiseThrowable}
+import fs2.{Pull, RaiseThrowable}
 import scodec.bits.ByteVector
 
 import java.nio.charset.Charset
@@ -53,31 +53,14 @@ package object state:
       .outputBytesE(writePasswordAuth)
 
   private def request[F[_]](f: Request => F[Response])(using Charset)(using RaiseThrowable[F]): State[F, Response] =
-    val state: State[F, (Response, Chunk[Byte])] =
+    val state: State[F, (Response, ByteVector)] =
       for
         request <- readRequest[F]
         response <- BytePullState.liftF[F, Byte, Response](f(request))
-        addressBytes <- BytePullState.liftE[F, Byte, Chunk[Byte]](encodeAddress(response.address))
+        addressBytes <- BytePullState.liftE[F, Byte, ByteVector](writeAddress(response.address))
       yield
         (response, addressBytes)
-    state.attempt.flatMap {
-      case Right((response, addressBytes)) =>
-        val addressTypeCode = AddressType.fromHost(response.address).code
-        for
-          _ <- BytePullState.output(socks5.code, response.reply.code, Reserved.code, addressTypeCode)
-          _ <- BytePullState.output(addressBytes)
-          _ <- BytePullState.output(encodePort(response.port))
-        yield
-          response
-      case Left(error) =>
-        for
-          _ <- BytePullState.output(socks5.code, Reply.fromError(error).code, Reserved.code, AddressType.Ipv4Address.code)
-          _ <- BytePullState.output(encodeIpAddress(ipv4"0.0.0.0"))
-          _ <- BytePullState.output(encodePort(port"0"))
-          response <- BytePullState.raiseError[F, Byte, Response](error)
-        yield
-          response
-    }
+    state.outputBytesE(writeRequest).map(_._1)
 
   private def readNegotiation[F[_]: RaiseThrowable]: State[F, List[Method]] =
     for
@@ -176,19 +159,29 @@ package object state:
       case Right(_) => ByteVector(version1.code, Success.code)
       case Left(f@Failure(code)) => ByteVector(version1.code, code)
       case Left(error) => ByteVector(version1.code, Failure.code)
-      
-  private def writeRequest(either: Either[Throwable, (Response, )])
 
-  private def encodeAddress(host: Host)(using Charset): Either[Error, Chunk[Byte]] =
+  private def writeRequest(either: Either[Throwable, (Response, ByteVector)]): ByteVector =
+    either match
+      case Right((response, addressBytes)) =>
+        val addressTypeCode = AddressType.fromHost(response.address).code
+        ByteVector(socks5.code, response.reply.code, Reserved.code, addressTypeCode) ++
+          addressBytes ++
+          writePort(response.port)
+      case Left(error) =>
+        ByteVector(socks5.code, Reply.fromError(error).code, Reserved.code, AddressType.Ipv4Address.code) ++
+          writeIpAddress(ipv4"0.0.0.0") ++
+          writePort(port"0")
+
+  private def writeAddress(host: Host)(using Charset): Either[Error, ByteVector] =
     host match
-      case ipAddress: IpAddress => encodeIpAddress(ipAddress).asRight
-      case host => encodeHost(host)
+      case ipAddress: IpAddress => writeIpAddress(ipAddress).asRight
+      case host => writeHost(host)
 
-  private def encodeIpAddress(ipAddress: IpAddress): Chunk[Byte] = Chunk.array(ipAddress.toBytes)
+  private def writeIpAddress(ipAddress: IpAddress): ByteVector = ByteVector(ipAddress.toBytes)
 
-  private def encodeHost(host: Host)(using Charset): Either[Error, Chunk[Byte]] =
-    ByteVector.encodeString(host.toString).value(host).map(bytes => Chunk.byteVector(bytes.length.toByte +: bytes))
+  private def writeHost(host: Host)(using Charset): Either[Error, ByteVector] =
+    ByteVector.encodeString(host.toString).value(host).map(bytes => bytes.length.toByte +: bytes)
 
-  private def encodePort(port: Port): Chunk[Byte] = Chunk.byteVector(ByteVector.fromInt(port.value, 2))
+  private def writePort(port: Port): ByteVector = ByteVector.fromInt(port.value, 2)
 
 end state
