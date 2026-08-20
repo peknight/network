@@ -12,7 +12,9 @@ import com.peknight.socks.SocksVersion.socks5
 import com.peknight.socks.error.UnsupportedSocksVersion
 import com.peknight.socks5.*
 import com.peknight.socks5.Command.{BIND, CONNECT, UDP_ASSOCIATE}
-import com.peknight.socks5.api.{ConnectionContext, Socks5Api}
+import com.peknight.socks5.State.Negotiating
+import com.peknight.socks5.api.Socks5Api
+import com.peknight.socks5.api.Socks5Api.Socks5PullState
 import com.peknight.socks5.auth.Method
 import com.peknight.socks5.auth.Method.*
 import com.peknight.socks5.auth.password.PasswordVersion.version1
@@ -26,21 +28,21 @@ import scodec.bits.ByteVector
 import java.nio.charset.Charset
 
 package object state:
-  type Socks5PullState[F[_], A] = BytePullState[F, Byte, State, A]
 
   def handle[F[_]](api: Socks5Api[F], socket: Socket[F])(using Charset)(using RaiseThrowable[F]): F[Unit] =
-    val ctx = ConnectionContext(socket.address, socket.peerAddress)
+    val connection = Connection(socket.address, socket.peerAddress)
     val state =
       for
-        acceptableMethod <- negotiation[F](method => api.negotiation(method, ctx))
-        _ <- authentication[F](acceptableMethod)(password => api.passwordAuth(password, ctx))
-        response <- request[F](request => api.connect(request, ctx))
+        acceptableMethod <- negotiation[F](method => api.negotiation(method, connection))
+        _ <- authentication[F](acceptableMethod)(password => api.passwordAuth(password, connection))
+        response <- request[F](request => api.connect(request, connection))
       yield
         ???
     ???
 
 
-  def negotiation[F[_]: RaiseThrowable](f: List[Method] => F[Method]): Socks5PullState[F, AcceptableMethod] =
+  def negotiation[F[_]: RaiseThrowable, Auth](f: Negotiating => F[Either[NoAcceptableMethod.type | AuthRequiredMethod, Auth]])
+  : Socks5PullState[F, Auth, AcceptableMethod] =
     readNegotiation[F]
       .flatMap(methods => BytePullState.liftF[F, Byte, State, Method](f(methods)))
       .flatMap {
@@ -90,11 +92,12 @@ package object state:
     yield
       methods
 
-  private def readSocks5Version[F[_]: RaiseThrowable]: Socks5PullState[F, SocksVersion] =
+  private def readSocks5Version[F[_]: RaiseThrowable, Auth]: Socks5PullState[F, State[Auth], SocksVersion] = {
     BytePullState.parse1[F, Byte, State, SocksVersion](version =>
       if version == socks5.code then socks5.asRight
       else UnsupportedSocksVersion(version).asLeft
     )(Socks5VersionEmpty)
+  }
 
   private def readMethods[F[_]: RaiseThrowable]: Socks5PullState[F, List[Method]] =
     BytePullState.mapSizedBytes[F, Byte, State, List[Method]](_.map(Method.apply).toList)(MethodEmpty)
