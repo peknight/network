@@ -3,6 +3,7 @@ package com.peknight.socks5.server
 import cats.syntax.either.*
 import cats.syntax.functor.*
 import com.comcast.ip4s.*
+import com.peknight.cats.instances.eitherT.given
 import com.peknight.error.Error
 import com.peknight.error.syntax.either.value
 import com.peknight.socks.SocksVersion
@@ -10,7 +11,7 @@ import com.peknight.socks.SocksVersion.socks5
 import com.peknight.socks.error.UnsupportedSocksVersion
 import com.peknight.socks5.*
 import com.peknight.socks5.Command.{BIND, CONNECT, UDP_ASSOCIATE}
-import com.peknight.socks5.PullState.outputE
+import com.peknight.socks5.Socks5PullState.outputE
 import com.peknight.socks5.State.Negotiating
 import com.peknight.socks5.api.Socks5Api
 import com.peknight.socks5.auth.Method
@@ -27,7 +28,7 @@ import java.nio.charset.Charset
 
 package object state:
 
-  def handle[F[_], Auth](api: Socks5Api[F, Auth], socket: Socket[F])(using Charset)(using RaiseThrowable[F]): F[Unit] =
+  def handle[F[_], Auth](api: Socks5Api[F, Auth], socket: Socket[F])(using Charset): F[Unit] =
     val connection = Connection(socket.address, socket.peerAddress)
     val state =
       for
@@ -39,81 +40,81 @@ package object state:
     ???
 
 
-  private def negotiation[F[_]: RaiseThrowable, Auth](f: Negotiating => F[Either[NoAcceptableMethod.type | AuthRequiredMethod, Auth]])
-  : PullState[F, AcceptableMethod] =
+  private def negotiation[F[_], Auth](f: Negotiating => F[Either[NoAcceptableMethod.type | AuthRequiredMethod, Auth]])
+  : Socks5PullState[F, AcceptableMethod] = {
     readNegotiation[F]
-      .flatMap(methods => PullState.liftF[F, Method](f(methods)))
+      .flatMap(methods => Socks5PullState.liftF[F, Either[NoAcceptableMethod.type | AuthRequiredMethod, Auth]](f(methods)).attempt)
       .flatMap {
-        case NoAcceptableMethod => PullState.raiseError[F, Byte, State, AcceptableMethod](NoAcceptableMethod)
-        case selected: AcceptableMethod => PullState.pure(selected)
+        case NoAcceptableMethod => Socks5PullState.raiseError[F, Byte, State, AcceptableMethod](NoAcceptableMethod)
+        case selected: AcceptableMethod => Socks5PullState.pure(selected)
       }
       .outputBytesE(either => writeSelected(either.toOption))
+  }
 
-  def authentication[F[_]](method: AcceptableMethod)(password: UPassword => F[Status])(using Charset)
-                          (using RaiseThrowable[F]): PullState[F, Unit] =
+  def authentication[F[_]](method: AcceptableMethod)(password: UPassword => F[Status])(using Charset): Socks5PullState[F, Unit] =
     method match
-      case NoAuthenticationRequired => PullState.unit
-      case GSSAPI => PullState.raiseError(UnsupportedMethod(method))
+      case NoAuthenticationRequired => Socks5PullState.unit
+      case GSSAPI => Socks5PullState.raiseError(UnsupportedMethod(method))
       case UsernamePassword => passwordAuth(password).as(())
-      case method@IANAAssigned(code) => PullState.raiseError(UnsupportedMethod(method))
-      case method@PrivateMethod(code) => PullState.raiseError(UnsupportedMethod(method))
+      case method@IANAAssigned(code) => Socks5PullState.raiseError(UnsupportedMethod(method))
+      case method@PrivateMethod(code) => Socks5PullState.raiseError(UnsupportedMethod(method))
 
-  private def passwordAuth[F[_]](f: UPassword => F[Status])(using Charset)(using RaiseThrowable[F]): PullState[F, Status] =
+  private def passwordAuth[F[_]](f: UPassword => F[Status])(using Charset): Socks5PullState[F, Status] =
     readPasswordAuth[F]
-      .flatMap(userPassword => PullState.liftF[F, Byte, State, Status](f(userPassword)))
+      .flatMap(userPassword => Socks5PullState.liftF[F, Byte, State, Status](f(userPassword)))
       .flatMap {
-        case s@Success => PullState.pure[F, Byte, State, Status](s)
-        case f@Failure(code) => PullState.raiseError(f)
+        case s@Success => Socks5PullState.pure[F, Byte, State, Status](s)
+        case f@Failure(code) => Socks5PullState.raiseError(f)
       }
       .outputBytesE(writeStatus)
 
-  def request[F[_]](connect: Request => F[Response])(using Charset)(using RaiseThrowable[F]): PullState[F, Response] =
-    val socks5PullState: PullState[F, (Response, ByteVector)] =
+  def request[F[_]](connect: Request => F[Response])(using Charset): Socks5PullState[F, Response] =
+    val socks5PullState: Socks5PullState[F, (Response, ByteVector)] =
       for
         request <- readRequest[F]
         response <- request.command match
           case CONNECT =>
-            PullState.liftF[F, Byte, State, Response](connect(request)).flatMap(response =>
-              if response.reply.success then PullState.pure[F, Byte, State, Response](response)
-              else PullState.raiseError(Error(response.reply)))
-          case BIND => PullState.raiseError(UnsupportedCommand(request.command.code))
-          case UDP_ASSOCIATE => PullState.raiseError(UnsupportedCommand(request.command.code))
-        addressBytes <- PullState.liftE[F, Byte, State, ByteVector](writeAddress(response.address))
+            Socks5PullState.liftF[F, Byte, State, Response](connect(request)).flatMap(response =>
+              if response.reply.success then Socks5PullState.pure[F, Byte, State, Response](response)
+              else Socks5PullState.raiseError(Error(response.reply)))
+          case BIND => Socks5PullState.raiseError(UnsupportedCommand(request.command.code))
+          case UDP_ASSOCIATE => Socks5PullState.raiseError(UnsupportedCommand(request.command.code))
+        addressBytes <- Socks5PullState.liftE[F, Byte, State, ByteVector](writeAddress(response.address))
       yield
         (response, addressBytes)
     socks5PullState.outputBytesE(writeResponse).map(_._1)
 
-  private def readNegotiation[F[_]: RaiseThrowable]: PullState[F, List[Method]] =
+  private def readNegotiation[F[_]]: Socks5PullState[F, List[Method]] =
     for
       _ <- readSocks5Version[F]
       methods <- readMethods[F]
     yield
       methods
 
-  private def readSocks5Version[F[_]: RaiseThrowable]: PullState[F, SocksVersion] =
-    PullState.parse1[F, SocksVersion](version =>
+  private def readSocks5Version[F[_]]: Socks5PullState[F, SocksVersion] =
+    Socks5PullState.parse1[F, SocksVersion](version =>
       if version == socks5.code then socks5.asRight
       else UnsupportedSocksVersion(version).asLeft
     )(Socks5VersionEmpty)
 
-  private def readMethods[F[_]: RaiseThrowable]: PullState[F, List[Method]] =
-    PullState.mapSizedBytes[F, List[Method]](_.map(Method.apply).toList)(MethodEmpty)
+  private def readMethods[F[_]]: Socks5PullState[F, List[Method]] =
+    Socks5PullState.mapSizedBytes[F, List[Method]](_.map(Method.apply).toList)(MethodEmpty)
 
-  private def readPasswordAuth[F[_]](using Charset)(using RaiseThrowable[F]): PullState[F, UPassword] =
+  private def readPasswordAuth[F[_]](using Charset): Socks5PullState[F, UPassword] =
     for
       _ <- readPasswordVersion[F]
-      username <- PullState.readSizedString[F](UsernameEmpty)
-      password <- PullState.readSizedString[F](PasswordEmpty)
+      username <- Socks5PullState.readSizedString[F](UsernameEmpty)
+      password <- Socks5PullState.readSizedString[F](PasswordEmpty)
     yield
       UPassword(username, password)
 
-  private def readPasswordVersion[F[_]: RaiseThrowable]: PullState[F, Unit] =
-    PullState.parse1[F, Unit](version =>
+  private def readPasswordVersion[F[_]]: Socks5PullState[F, Unit] =
+    Socks5PullState.parse1[F, Unit](version =>
       if version == version1.code then ().asRight
       else UnsupportedPasswordVersion(version).asLeft
     )(PasswordVersionEmpty)
 
-  private def readRequest[F[_]](using Charset)(using RaiseThrowable[F]): PullState[F, Request] =
+  private def readRequest[F[_]](using Charset): Socks5PullState[F, Request] =
     for
       _ <- readSocks5Version[F]
       command <- readCommand[F]
@@ -123,18 +124,18 @@ package object state:
     yield
       Request(command, address, port)
 
-  private def readCommand[F[_]: RaiseThrowable]: PullState[F, Command] =
-    PullState.parse1[F, Command](cmd =>
+  private def readCommand[F[_]]: Socks5PullState[F, Command] =
+    Socks5PullState.parse1[F, Command](cmd =>
       Command.values.find(_.code == cmd).toRight(UnsupportedCommand(cmd))
     )(CommandEmpty)
 
-  private def readReserved[F[_]: RaiseThrowable]: PullState[F, Unit] =
-    PullState.parse1[F, Unit](rsv =>
+  private def readReserved[F[_]]: Socks5PullState[F, Unit] =
+    Socks5PullState.parse1[F, Unit](rsv =>
       if rsv == Reserved.code then ().asRight
       else UnsupportedReserved(rsv).asLeft
     )(ReservedEmpty)
 
-  private def readAddress[F[_]](using Charset)(using RaiseThrowable[F]): PullState[F, Host] =
+  private def readAddress[F[_]](using Charset): Socks5PullState[F, Host] =
     for
       addressType <- readAddressType[F]
       address <- addressType match
@@ -144,28 +145,28 @@ package object state:
     yield
       address
 
-  private def readAddressType[F[_]: RaiseThrowable]: PullState[F, AddressType] =
-    PullState.parse1[F, AddressType](code =>
+  private def readAddressType[F[_]]: Socks5PullState[F, AddressType] =
+    Socks5PullState.parse1[F, AddressType](code =>
       AddressType.values.find(_.code == code).toRight(UnsupportedAddressType(code))
     )(AddressTypeEmpty)
 
-  private def readIpv4Address[F[_]: RaiseThrowable]: PullState[F, Ipv4Address] =
-    PullState.parseChunk[F, Ipv4Address](_.unconsN(4))(chunk =>
+  private def readIpv4Address[F[_]]: Socks5PullState[F, Ipv4Address] =
+    Socks5PullState.parseChunk[F, Ipv4Address](_.unconsN(4))(chunk =>
       Ipv4Address.fromBytes(chunk.toArray).toRight(IllegalIpv4Address(chunk.toByteVector))
     )(Ipv4AddressEmpty)
 
-  private def readDomainName[F[_]](using Charset)(using RaiseThrowable[F]): PullState[F, Hostname] =
-    PullState.parseSizedString[F, Hostname](domainName =>
+  private def readDomainName[F[_]](using Charset): Socks5PullState[F, Hostname] =
+    Socks5PullState.parseSizedString[F, Hostname](domainName =>
       Hostname.fromString(domainName).toRight(IllegalDomainName(domainName))
     )(DomainNameEmpty)
 
-  private def readIpv6Address[F[_]: RaiseThrowable]: PullState[F, Ipv6Address] =
-    PullState.parseChunk[F, Ipv6Address](_.unconsN(16))(chunk =>
+  private def readIpv6Address[F[_]]: Socks5PullState[F, Ipv6Address] =
+    Socks5PullState.parseChunk[F, Ipv6Address](_.unconsN(16))(chunk =>
       Ipv6Address.fromBytes(chunk.toArray).toRight(IllegalIpv6Address(chunk.toByteVector))
     )(Ipv6AddressEmpty)
 
-  private def readPort[F[_]: RaiseThrowable]: PullState[F, Port] =
-    PullState.parseChunk[F, Port](_.unconsN(2)) { chunk =>
+  private def readPort[F[_]]: Socks5PullState[F, Port] =
+    Socks5PullState.parseChunk[F, Port](_.unconsN(2)) { chunk =>
       val port = chunk.toByteVector.toInt()
       Port.fromInt(port).toRight(IllegalPort(port))
     }(PortEmpty)
