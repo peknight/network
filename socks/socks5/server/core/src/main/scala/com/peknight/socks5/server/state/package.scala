@@ -30,9 +30,9 @@ import java.nio.charset.Charset
 
 package object state:
 
-  def server[F[_], Auth, ConnectState, BindState, UDPAssociateState]
-            (api: Socks5ServerApi[F, Auth, ConnectState, BindState, UDPAssociateState])
-            (using Charset)(using Concurrent[F]): Socks5PullState[F, State] =
+  def state[F[_], Auth, ConnectState, BindState, UDPAssociateState]
+           (api: Socks5ServerApi[F, Auth, ConnectState, BindState, UDPAssociateState])
+           (using Charset)(using Concurrent[F]): Socks5PullState[F, State] =
     for
       _ <- negotiation[F, Auth](api.negotiationApi.negotiation)
       _ <- authentication[F, Auth](api.usernamePasswordApi.usernamePassword)(api.gssApiApi.gssApi,
@@ -270,7 +270,7 @@ package object state:
   private def writeResponse(state: State): ByteVector =
     val (response, addressBytes) = state match
       case s: RespondedState[?, ?] => (s.response, s.addressBytes)
-      case _ => (Response.fromState(state), writeIpAddress(Response.errorHost))
+      case _ => (Response.fromState(state), writeIpAddress(Response.defaultHost))
     val addressTypeCode = AddressType.fromHost(response.address).code
     ByteVector(socks5.code, response.reply.code, Reserved.code, addressTypeCode) ++
       addressBytes ++

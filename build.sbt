@@ -66,12 +66,26 @@ lazy val socks5Core = (projectMatrix in file("socks/socks5/core"))
 lazy val socks5Server = (project in file("socks/socks5/server"))
   .settings(name := "socks5-server")
   .aggregate(socks5ServerCore.projectRefs *)
+  .aggregate(socks5ServerIO.projectRefs *)
 
 lazy val socks5ServerCore = (projectMatrix in file("socks/socks5/server/core"))
   .dependsOn(socks5Core)
   .settings(name := "socks5-server-core")
   .settings(libraryDependencies ++= dependencies(
     peknight.cats,
+  ))
+  .jvmPlatform(scalaVersions = Seq(scala.scala3.version))
+  .jsPlatform(scalaVersions = Seq(scala.scala3.version))
+
+lazy val socks5ServerIO = (projectMatrix in file("socks/socks5/server/io"))
+  .dependsOn(socks5ServerCore)
+  .settings(name := "socks5-server-io")
+  .settings(libraryDependencies ++= dependencies(
+    fs2.io,
+  ))
+  .settings(libraryDependencies ++= testDependencies(
+    scalaTest.flatSpec,
+    typelevel.catsEffect.testingScalaTest,
   ))
   .jvmPlatform(scalaVersions = Seq(scala.scala3.version))
   .jsPlatform(scalaVersions = Seq(scala.scala3.version))
