@@ -1,5 +1,6 @@
 package com.peknight.socks5
 
+import com.peknight.error.std.WrongClassTag
 import com.peknight.fs2.pull.state.BytePullState
 import com.peknight.fs2.pull.state.BytePullState.{attempt as pullStateAttempt, output as pullStateOutput, outputE as pullStateOutputE, outputL as pullStateOutputL}
 import com.peknight.socks5.State.Terminated
@@ -8,6 +9,7 @@ import fs2.{Chunk, Pull, Stream}
 import scodec.bits.ByteVector
 
 import java.nio.charset.Charset
+import scala.reflect.ClassTag
 
 object Socks5PullState:
   def apply[F[_], A](f: (State, Stream[F, Byte]) => Pull[F, Byte, Either[Terminated, ((State, Stream[F, Byte]), A)]])
@@ -18,7 +20,14 @@ object Socks5PullState:
 
   def unit[F[_]]: Socks5PullState[F, Unit] = BytePullState.unit[F, State, Terminated]
 
-  def get[F[_]]: Socks5PullState[F, State] = BytePullState.get[F, State, Terminated]
+  def get[F[_]]: Socks5PullState[F, (State, Stream[F, Byte])] = BytePullState.get[F, State, Terminated]
+
+  def getS[F[_]]: Socks5PullState[F, State] = BytePullState.getS[F, State, Terminated]
+
+  def setS[F[_]](s: State): Socks5PullState[F, Unit] =
+    s match
+      case terminated: Terminated => liftL[F, Unit](terminated)
+      case state => BytePullState.setS[F, State, Terminated](s)
 
   def liftPE[F[_], A](pull: Pull[F, Byte, Either[Terminated, A]]): Socks5PullState[F, A] =
     BytePullState.liftPE[F, State, Terminated, A](pull)
@@ -70,6 +79,12 @@ object Socks5PullState:
     BytePullState.output[F, State, Terminated](Chunk.byteVector(bytes))
 
   def output1[F[_]](o: Byte): Socks5PullState[F, Unit] = BytePullState.output1[F, State, Terminated](o)
+
+  def typed[F[_], A: ClassTag](any: Any): Socks5PullState[F, A] =
+    BytePullState.typed[F, State, Terminated, Any, A](any)((s, a) => s.error(WrongClassTag[A](a)))
+
+  def typedS[F[_], A: ClassTag]: Socks5PullState[F, A] =
+    BytePullState.typedS[F, State, Terminated, A](s => s.error(WrongClassTag[A](s)))
 
   def pull[F[_], A](f: ToPull[F, Byte] => Pull[F, Byte, Option[(A, Stream[F, Byte])]])(eof: => Throwable)
   : Socks5PullState[F, A] =
@@ -124,5 +139,9 @@ object Socks5PullState:
       state.pullStateOutput(f)
     def outputL(f: Terminated => ByteVector): Socks5PullState[F, A] =
       state.pullStateOutputL(f)
+  end extension
+  extension [F[_]] (state: Socks5PullState[F, State])
+    def outputS(f: State => ByteVector): Socks5PullState[F, State] =
+      state.attempt.pullStateOutputE(either => f(either.fold[State](identity, identity)))
   end extension
 end Socks5PullState

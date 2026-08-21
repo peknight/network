@@ -14,5 +14,6 @@ object Status:
   case class Failure(code: Byte) extends Status with AuthFailure
   object Failure:
     def code: Byte = 0xFF.toByte
+    val default: Failure = Failure(code)
   end Failure
 end Status

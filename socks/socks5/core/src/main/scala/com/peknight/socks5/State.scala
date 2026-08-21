@@ -5,6 +5,7 @@ import com.peknight.socks5.auth.Method
 import com.peknight.socks5.auth.Method.*
 import com.peknight.socks5.auth.password.Status.Failure
 import com.peknight.socks5.auth.password.UsernamePassword as UPassword
+import scodec.bits.ByteVector
 
 import java.io.EOFException
 
@@ -45,12 +46,23 @@ object State:
   sealed trait RequestedState[+Auth] extends RequestState[Auth]:
     def request: Request
   end RequestedState
+  // 已回复状态
+  sealed trait RespondedState[+Auth, +S] extends RequestedState[Auth]:
+    def response: Response
+    def addressBytes: ByteVector
+    def state: S
+  end RespondedState
+  sealed trait RespondedSuccessState[+Auth, +S] extends RespondedState[Auth, S]
+  sealed trait RespondedFailedState[+Auth, +S] extends RespondedState[Auth, S] with Terminated
   // Connect状态
-  sealed trait ConnectState[+Auth, S] extends RequestedState[Auth]
+  sealed trait ConnectedState[+Auth, +S] extends RespondedState[Auth, S]
   // Bind状态
-  sealed trait BindState[+Auth, S] extends RequestedState[Auth]
+  sealed trait BoundState[+Auth, +S] extends RespondedState[Auth, S]
   // UDPAssociate状态
-  sealed trait UDPAssociateState[+Auth, S] extends RequestedState[Auth]
+  sealed trait UDPAssociatedState[+Auth, +S] extends RespondedState[Auth, S]
+
+  // 正常关闭
+  sealed trait Closed[+Auth, +S] extends RespondedSuccessState[Auth, S] with Terminated
 
   // 运行状态
   sealed trait Active extends State:
@@ -76,6 +88,13 @@ object State:
   sealed trait AuthenticationPhase[+M <: AcceptableMethod] extends AuthenticationState[M]
   // 请求阶段
   sealed trait RequestPhase[+Auth] extends RequestState[Auth]
+  sealed trait RespondedPhase[+Auth, +S] extends RespondedState[Auth, S]
+  // Connect阶段
+  sealed trait ConnectedPhase[+Auth, +S] extends RespondedPhase[Auth, S] with ConnectedState[Auth, S]
+  // Bind阶段
+  sealed trait BoundPhase[+Auth, +S] extends RespondedPhase[Auth, S] with BoundState[Auth, S]
+  // UDPAssociate阶段
+  sealed trait UDPAssociatedPhase[+Auth, +S] extends RespondedPhase[Auth, S] with UDPAssociatedState[Auth, S]
 
   // 初始
   case class Initial private[socks5] (connection: Connection) extends InitialPhase with Active:
@@ -161,10 +180,111 @@ object State:
   case class Requested[Auth] private[socks5] (request: Request, auth: Auth, selected: AcceptableMethod,
                                               methods: List[Method], connection: Connection)
     extends RequestPhase[Auth] with RequestedState[Auth] with Active:
-    def error(error: Throwable): Terminated = RequestedError(request, auth, selected, methods, connection, error)
+    private[socks5] def connected[S](response: Response, state: S, addressBytes: ByteVector): Connected[Auth, S] =
+      Connected(state, response, addressBytes, request, auth, selected, methods, connection)
+    private[socks5] def bound[S](response: Response, state: S, addressBytes: ByteVector): Bound[Auth, S] =
+      Bound(state, response, addressBytes, request, auth, selected, methods, connection)
+    private[socks5] def udpAssociated[S](response: Response, state: S, addressBytes: ByteVector): UDPAssociated[Auth, S] =
+      UDPAssociated(state, response, addressBytes, request, auth, selected, methods, connection)
+    private[socks5] def connectFailed[S](response: Response, state: S, addressBytes: ByteVector): ConnectFailed[Auth, S] =
+      ConnectFailed(state, response, addressBytes, request, auth, selected, methods, connection)
+    private[socks5] def bindFailed[S](response: Response, state: S, addressBytes: ByteVector): BindFailed[Auth, S] =
+      BindFailed(state, response, addressBytes, request, auth, selected, methods, connection)
+    private[socks5] def udpAssociateFailed[S](response: Response, state: S, addressBytes: ByteVector): UDPAssociateFailed[Auth, S] =
+      UDPAssociateFailed(state, response, addressBytes, request, auth, selected, methods, connection)
+    private[socks5] def unsupportedCommand: UnsupportedCommand[Auth] =
+      UnsupportedCommand(request, auth, selected, methods, connection)
+    private[socks5] def error(error: Throwable): Terminated = RequestedError(request, auth, selected, methods, connection, error)
   end Requested
+  case class UnsupportedCommand[Auth] private[socks5] (request: Request, auth: Auth, selected: AcceptableMethod,
+                                                       methods: List[Method], connection: Connection)
+    extends RequestPhase[Auth] with RequestedState[Auth] with Terminated
   // 已请求异常
   case class RequestedError[Auth] private[socks5] (request: Request, auth: Auth, selected: AcceptableMethod,
                                                    methods: List[Method], connection: Connection, error: Throwable)
     extends RequestPhase[Auth] with RequestedState[Auth] with ErrorState
+
+  // 已Connect
+  case class Connected[Auth, S] private[socks5] (state: S, response: Response, addressBytes: ByteVector,
+                                                 request: Request, auth: Auth, selected: AcceptableMethod,
+                                                 methods: List[Method], connection: Connection)
+    extends ConnectedPhase[Auth, S] with RespondedSuccessState[Auth, S] with Active:
+    private[socks5] def closed: ConnectClosed[Auth, S] =
+      ConnectClosed(state, response, addressBytes, request, auth, selected, methods, connection)
+    private[socks5] def closed(state: S): ConnectClosed[Auth, S] =
+      ConnectClosed(state, response, addressBytes, request, auth, selected, methods, connection)
+    private[socks5] def error(error: Throwable): Terminated =
+      ConnectError(state, response, addressBytes, request, auth, selected, methods, connection, error)
+  end Connected
+  // Connect失败
+  case class ConnectFailed[+Auth, +S] private[socks5] (state: S, response: Response, addressBytes: ByteVector,
+                                                       request: Request, auth: Auth, selected: AcceptableMethod,
+                                                       methods: List[Method], connection: Connection)
+    extends ConnectedPhase[Auth, S] with RespondedFailedState[Auth, S]
+  // Connect关闭
+  case class ConnectClosed[+Auth, +S] private[socks5] (state: S, response: Response, addressBytes: ByteVector,
+                                                       request: Request, auth: Auth, selected: AcceptableMethod,
+                                                       methods: List[Method], connection: Connection)
+    extends ConnectedPhase[Auth, S] with Closed[Auth, S]
+  // Connect异常
+  case class ConnectError[Auth, S] private[socks5] (state: S, response: Response, addressBytes: ByteVector,
+                                                    request: Request, auth: Auth, selected: AcceptableMethod,
+                                                    methods: List[Method], connection: Connection, error: Throwable)
+    extends ConnectedPhase[Auth, S] with ErrorState
+
+  // 已Bind
+  case class Bound[Auth, S] private[socks5] (state: S, response: Response, addressBytes: ByteVector, request: Request,
+                                             auth: Auth, selected: AcceptableMethod, methods: List[Method],
+                                             connection: Connection)
+    extends BoundPhase[Auth, S] with RespondedSuccessState[Auth, S] with Active:
+    private[socks5] def closed: BindClosed[Auth, S] =
+      BindClosed(state, response, addressBytes, request, auth, selected, methods, connection)
+    private[socks5] def closed(state: S): BindClosed[Auth, S] =
+      BindClosed(state, response, addressBytes, request, auth, selected, methods, connection)
+    private[socks5] def error(error: Throwable): Terminated =
+      BindError(state, response, addressBytes, request, auth, selected, methods, connection, error)
+  end Bound
+  // Bind失败
+  case class BindFailed[+Auth, +S] private[socks5] (state: S, response: Response, addressBytes: ByteVector,
+                                                    request: Request, auth: Auth, selected: AcceptableMethod,
+                                                    methods: List[Method], connection: Connection)
+    extends BoundPhase[Auth, S] with RespondedFailedState[Auth, S]
+  // Bind关闭
+  case class BindClosed[+Auth, +S] private[socks5] (state: S, response: Response, addressBytes: ByteVector,
+                                                    request: Request, auth: Auth, selected: AcceptableMethod,
+                                                    methods: List[Method], connection: Connection)
+    extends BoundPhase[Auth, S] with Closed[Auth, S]
+  // Bind异常
+  case class BindError[Auth, S] private[socks5] (state: S, response: Response, addressBytes: ByteVector,
+                                                 request: Request, auth: Auth, selected: AcceptableMethod,
+                                                 methods: List[Method], connection: Connection, error: Throwable)
+    extends BoundPhase[Auth, S] with ErrorState
+
+  // 已UDPAssociate
+  case class UDPAssociated[Auth, S] private[socks5] (state: S, response: Response, addressBytes: ByteVector,
+                                                     request: Request, auth: Auth, selected: AcceptableMethod,
+                                                     methods: List[Method], connection: Connection)
+    extends UDPAssociatedPhase[Auth, S] with RespondedSuccessState[Auth, S] with Active:
+    private[socks5] def closed: UDPAssociateClosed[Auth, S] =
+      UDPAssociateClosed(state, response, addressBytes, request, auth, selected, methods, connection)
+    private[socks5] def closed(state: S): UDPAssociateClosed[Auth, S] =
+      UDPAssociateClosed(state, response, addressBytes, request, auth, selected, methods, connection)
+    private[socks5] def error(error: Throwable): Terminated =
+      UDPAssociateError(state, response, addressBytes, request, auth, selected, methods, connection, error)
+  end UDPAssociated
+  // UDPAssociate失败
+  case class UDPAssociateFailed[+Auth, +S] private[socks5] (state: S, response: Response, addressBytes: ByteVector,
+                                                            request: Request, auth: Auth, selected: AcceptableMethod,
+                                                            methods: List[Method], connection: Connection)
+    extends UDPAssociatedPhase[Auth, S] with RespondedFailedState[Auth, S]
+  // UDPAssociate关闭
+  case class UDPAssociateClosed[+Auth, +S] private[socks5] (state: S, response: Response, addressBytes: ByteVector,
+                                                            request: Request, auth: Auth, selected: AcceptableMethod,
+                                                            methods: List[Method], connection: Connection)
+    extends UDPAssociatedPhase[Auth, S] with Closed[Auth, S]
+  // UDPAssociate异常
+  case class UDPAssociateError[Auth, S] private[socks5] (state: S, response: Response, addressBytes: ByteVector,
+                                                         request: Request, auth: Auth, selected: AcceptableMethod,
+                                                         methods: List[Method], connection: Connection, error: Throwable)
+    extends UDPAssociatedPhase[Auth, S] with ErrorState
 end State
