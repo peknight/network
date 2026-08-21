@@ -12,7 +12,7 @@ import com.comcast.ip4s.{Ipv4Address, Ipv6Address, Port}
 import com.peknight.fs2.pipe.scanS
 import com.peknight.http4s.uri.host.fromString
 import com.peknight.http4s.uri.scheme.{ws, wss}
-import fs2.{Pipe, Stream}
+import fs2.Pipe
 import org.http4s.*
 import org.http4s.Method.HEAD
 import org.http4s.client.Client
@@ -186,9 +186,27 @@ trait ReverseProxy:
     yield
       response
 
-  private def webSocketFramePipe[F[_]: Concurrent](connection: WSConnection[F], release: F[Unit]): Pipe[F, WebSocketFrame, WebSocketFrame] =
-    in => Stream(
-      in.through(scanS[F, WebSocketFrame, WebSocketFrame, WSFrame, Boolean](true) {
+  private def webSocketFramePipe[F[_]: Concurrent](connection: WSConnection[F], release: F[Unit])
+  : Pipe[F, WebSocketFrame, WebSocketFrame] =
+    in => connection.receiveStream
+      .evalMap {
+        case WSFrame.Close(statusCode, reason) =>
+          println(s"WebSocket|receive|close|$statusCode|$reason")
+          WebSocketFrame.Close(statusCode).pure[F].rethrow
+        case WSFrame.Ping(data) =>
+          println(s"WebSocket|receive|ping|${data.toHex}")
+          WebSocketFrame.Ping(data).pure[F]
+        case WSFrame.Pong(data) =>
+          println(s"WebSocket|receive|pong|${data.toHex}")
+          WebSocketFrame.Pong(data).pure[F]
+        case WSFrame.Text(data, last) =>
+          println(s"WebSocket|receive|text|$data|$last")
+          WebSocketFrame.Text(data, last).pure[F]
+        case WSFrame.Binary(data, last) =>
+          println(s"WebSocket|receive|binary|${data.toHex}|$last")
+          WebSocketFrame.Binary(data, last).pure[F]
+      }
+      .concurrently(in.through(scanS[F, WebSocketFrame, WebSocketFrame, WSFrame, Boolean](true) {
         case (last, frame: WebSocketFrame.Close) =>
           println(s"WebSocket|send|close|$last|${frame.data.toHex}|${frame.last}")
           (frame.last, WSFrame.Close(frame.closeCode, ""))
@@ -214,25 +232,8 @@ trait ReverseProxy:
           case _ =>
             println(s"WebSocket|send|${frame.getClass.getSimpleName}|false|${frame.data.toHex}|${frame.last}|binary")
             (true, WSFrame.Binary(frame.data, frame.last))
-      }).through(connection.sendPipe).map(_ => none[WebSocketFrame]),
-      connection.receiveStream.evalMap {
-        case WSFrame.Close(statusCode, reason) =>
-          println(s"WebSocket|receive|close|$statusCode|$reason")
-          WebSocketFrame.Close(statusCode).pure[F].rethrow
-        case WSFrame.Ping(data) =>
-          println(s"WebSocket|receive|ping|${data.toHex}")
-          WebSocketFrame.Ping(data).pure[F]
-        case WSFrame.Pong(data) =>
-          println(s"WebSocket|receive|pong|${data.toHex}")
-          WebSocketFrame.Pong(data).pure[F]
-        case WSFrame.Text(data, last) =>
-          println(s"WebSocket|receive|text|$data|$last")
-          WebSocketFrame.Text(data, last).pure[F]
-        case WSFrame.Binary(data, last) =>
-          println(s"WebSocket|receive|binary|${data.toHex}|$last")
-          WebSocketFrame.Binary(data, last).pure[F]
-      }.map(_.some)
-    ).parJoin(2).onFinalize(release).collect { case Some(frame) => frame }
+      }).through(connection.sendPipe))
+      .onFinalize(release)
 
   extension [A] (option: Option[A])
     private def mapUri[F[_]](request: Request[F])(f: PartialFunction[Request[F], Uri])(get: A => Uri)(update: (A, Uri) => A): Option[A] =

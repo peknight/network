@@ -217,12 +217,12 @@ object State:
       ConnectError(state, response, addressBytes, request, auth, selected, methods, connection, error)
   end Connected
   // Connect失败
-  case class ConnectFailed[+Auth, +S] private[socks5] (state: S, response: Response, addressBytes: ByteVector,
+  case class ConnectFailed[Auth, S] private[socks5] (state: S, response: Response, addressBytes: ByteVector,
                                                        request: Request, auth: Auth, selected: AcceptableMethod,
                                                        methods: List[Method], connection: Connection)
     extends ConnectedPhase[Auth, S] with RespondedFailedState[Auth, S]
   // Connect关闭
-  case class ConnectClosed[+Auth, +S] private[socks5] (state: S, response: Response, addressBytes: ByteVector,
+  case class ConnectClosed[Auth, S] private[socks5] (state: S, response: Response, addressBytes: ByteVector,
                                                        request: Request, auth: Auth, selected: AcceptableMethod,
                                                        methods: List[Method], connection: Connection)
     extends ConnectedPhase[Auth, S] with Closed[Auth, S]
@@ -245,12 +245,12 @@ object State:
       BindError(state, response, addressBytes, request, auth, selected, methods, connection, error)
   end Bound
   // Bind失败
-  case class BindFailed[+Auth, +S] private[socks5] (state: S, response: Response, addressBytes: ByteVector,
+  case class BindFailed[Auth, S] private[socks5] (state: S, response: Response, addressBytes: ByteVector,
                                                     request: Request, auth: Auth, selected: AcceptableMethod,
                                                     methods: List[Method], connection: Connection)
     extends BoundPhase[Auth, S] with RespondedFailedState[Auth, S]
   // Bind关闭
-  case class BindClosed[+Auth, +S] private[socks5] (state: S, response: Response, addressBytes: ByteVector,
+  case class BindClosed[Auth, S] private[socks5] (state: S, response: Response, addressBytes: ByteVector,
                                                     request: Request, auth: Auth, selected: AcceptableMethod,
                                                     methods: List[Method], connection: Connection)
     extends BoundPhase[Auth, S] with Closed[Auth, S]
@@ -273,12 +273,12 @@ object State:
       UDPAssociateError(state, response, addressBytes, request, auth, selected, methods, connection, error)
   end UDPAssociated
   // UDPAssociate失败
-  case class UDPAssociateFailed[+Auth, +S] private[socks5] (state: S, response: Response, addressBytes: ByteVector,
+  case class UDPAssociateFailed[Auth, S] private[socks5] (state: S, response: Response, addressBytes: ByteVector,
                                                             request: Request, auth: Auth, selected: AcceptableMethod,
                                                             methods: List[Method], connection: Connection)
     extends UDPAssociatedPhase[Auth, S] with RespondedFailedState[Auth, S]
   // UDPAssociate关闭
-  case class UDPAssociateClosed[+Auth, +S] private[socks5] (state: S, response: Response, addressBytes: ByteVector,
+  case class UDPAssociateClosed[Auth, S] private[socks5] (state: S, response: Response, addressBytes: ByteVector,
                                                             request: Request, auth: Auth, selected: AcceptableMethod,
                                                             methods: List[Method], connection: Connection)
     extends UDPAssociatedPhase[Auth, S] with Closed[Auth, S]

@@ -5,7 +5,7 @@ import com.peknight.fs2.pull.state.BytePullState
 import com.peknight.fs2.pull.state.BytePullState.{attempt as pullStateAttempt, output as pullStateOutput, outputE as pullStateOutputE, outputL as pullStateOutputL}
 import com.peknight.socks5.State.Terminated
 import fs2.Stream.ToPull
-import fs2.{Chunk, Pull, Stream}
+import fs2.{Chunk, Pipe, Pull, Stream}
 import scodec.bits.ByteVector
 
 import java.nio.charset.Charset
@@ -80,6 +80,9 @@ object Socks5PullState:
 
   def output1[F[_]](o: Byte): Socks5PullState[F, Unit] = BytePullState.output1[F, State, Terminated](o)
 
+  def pipe[F[_]](pipe: Pipe[F, Byte, Byte]): Socks5PullState[F, Unit] =
+    BytePullState.pipe[F, State, Terminated](pipe)
+    
   def typed[F[_], A: ClassTag](any: Any): Socks5PullState[F, A] =
     BytePullState.typed[F, State, Terminated, Any, A](any)((s, a) => s.error(WrongClassTag[A](a)))
 

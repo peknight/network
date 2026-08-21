@@ -1,6 +1,7 @@
 package com.peknight.socks5.server
 
 import cats.Applicative
+import cats.effect.kernel.Concurrent
 import cats.syntax.applicative.*
 import cats.syntax.either.*
 import com.comcast.ip4s.*
@@ -15,14 +16,14 @@ import com.peknight.socks5.*
 import com.peknight.socks5.Command.{BIND, CONNECT, UDP_ASSOCIATE}
 import com.peknight.socks5.Socks5PullState.{attempt, outputS}
 import com.peknight.socks5.State.{NoAcceptableMethod as _, UnsupportedCommand as _, *}
-import com.peknight.socks5.api.Socks5Api
 import com.peknight.socks5.auth.Method
 import com.peknight.socks5.auth.Method.*
 import com.peknight.socks5.auth.password.PasswordVersion.version1
 import com.peknight.socks5.auth.password.Status.{Failure, Success}
 import com.peknight.socks5.auth.password.{Status, UsernamePassword as UPassword}
 import com.peknight.socks5.error.*
-import fs2.Pull
+import com.peknight.socks5.server.api.Socks5ServerApi
+import fs2.{Pipe, Pull, Stream}
 import scodec.bits.ByteVector
 
 import java.nio.charset.Charset
@@ -30,14 +31,16 @@ import java.nio.charset.Charset
 package object state:
 
   def server[F[_], Auth, ConnectState, BindState, UDPAssociateState]
-            (api: Socks5Api[F, Auth, ConnectState, BindState, UDPAssociateState])
-            (using Charset): Socks5PullState[F, State] =
+            (api: Socks5ServerApi[F, Auth, ConnectState, BindState, UDPAssociateState])
+            (using Charset)(using Concurrent[F]): Socks5PullState[F, State] =
     for
-      _ <- negotiation[F, Auth](api.negotiation)
-      _ <- authentication[F, Auth](api.usernamePassword)(api.gssApi, api.ianaAssigned, api.privateMethod)
-      _ <- request[F, Auth, ConnectState, BindState, UDPAssociateState](api.connect)(api.bind)(api.udpAssociate)
-      _ <- established[F, Auth, ConnectState, BindState, UDPAssociateState](api.connected, api.bound,
-        api.udpAssociated)
+      _ <- negotiation[F, Auth](api.negotiationApi.negotiation)
+      _ <- authentication[F, Auth](api.usernamePasswordApi.usernamePassword)(api.gssApiApi.gssApi,
+        api.ianaAssignedApi.ianaAssigned, api.privateMethodApi.privateMethod)
+      _ <- request[F, Auth, ConnectState, BindState, UDPAssociateState](api.connectApi.connect)(api.bindApi.bind)(
+        api.udpAssociateApi.udpAssociate)
+      _ <- established[F, Auth, ConnectState, BindState, UDPAssociateState](api.connectApi.connectSend,
+        api.connectApi.connectReceive)(api.bindApi.bound, api.udpAssociateApi.udpAssociated)
       state <- Socks5PullState.getS[F]
     yield
       state
@@ -119,10 +122,6 @@ package object state:
         request <- readRequest[F]
         requested = authenticated.requested(request)
         _ <- Socks5PullState.setS(requested)
-        f = request.command match
-          case CONNECT => connectF
-          case BIND => bindF
-          case UDP_ASSOCIATE => udpAssociateF
         state <- request.command match
           case CONNECT => handleRequest[F, Auth, ConnectState, Connected[Auth, ConnectState], ConnectFailed[Auth, ConnectState]](connectF)(_.connected(_, _, _))(_.connectFailed(_, _, _))
           case BIND => handleRequest[F, Auth, BindState, Bound[Auth, BindState], BindFailed[Auth, BindState]](bindF)(_.bound(_, _, _))(_.bindFailed(_, _, _))
@@ -147,17 +146,27 @@ package object state:
     yield
       state
 
-  private def established[F[_], Auth, ConnectState, BindState, UDPAssociateState](
-                                                                                   connected: Socks5PullState[F, Unit],
-                                                                                   bound: Socks5PullState[F, Unit],
-                                                                                   udpAssociated: Socks5PullState[F, Unit]
-                                                                                 ): Socks5PullState[F, Unit] =
+  private def established[F[_]: Concurrent, Auth, ConnectState, BindState, UDPAssociateState]
+                         (connectSend: Connected[Auth, ConnectState] => Pipe[F, Byte, Unit],
+                          connectReceive: Connected[Auth, ConnectState] => Stream[F, Byte])
+                         (bound: Socks5PullState[F, Unit], udpAssociated: Socks5PullState[F, Unit])
+  : Socks5PullState[F, Unit] =
     Socks5PullState.getS[F].flatMap {
-      case _: Connected[?, ?] => connected
+      case _: Connected[?, ?] => connected(connectSend)(connectReceive)
       case _: Bound[?, ?] => bound
       case _: UDPAssociated[?, ?] => udpAssociated
       case state => Socks5PullState.liftT[F, Unit](WrongClassTag[RespondedSuccessState[?, ?]](state))
     }
+
+  private def connected[F[_]: Concurrent, Auth, ConnectState](send: Connected[Auth, ConnectState] => Pipe[F, Byte, Unit])
+                                                             (receive: Connected[Auth, ConnectState] => Stream[F, Byte])
+  : Socks5PullState[F, Unit] =
+    for
+      connected <- Socks5PullState.typedS[F, Connected[Auth, ConnectState]]
+      _ <- Socks5PullState.pipe[F](in => receive(connected).concurrently(in.through(send(connected)))).attempt
+      _ <- Socks5PullState.setS(connected.closed)
+    yield
+      ()
 
   private def readNegotiation[F[_]]: Socks5PullState[F, List[Method]] =
     for
