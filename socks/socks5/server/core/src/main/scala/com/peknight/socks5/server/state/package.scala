@@ -40,7 +40,7 @@ package object state:
         api.ianaAssignedApi.ianaAssigned, api.privateMethodApi.privateMethod)
       _ <- request[F, Auth, ConnectState, BindState, UDPAssociateState](api.connectApi.connect)(api.bindApi.bind)(
         api.udpAssociateApi.udpAssociate)
-      _ <- established[F, Auth, ConnectState, BindState, UDPAssociateState](api.connectApi.duplex)(api.bindApi.bound,
+      _ <- established[F, Auth, ConnectState, BindState, UDPAssociateState](api.connectApi.tunnel)(api.bindApi.bound,
         api.udpAssociateApi.udpAssociated)
       state <- Socks5PullState.getS[F]
     yield
@@ -148,24 +148,24 @@ package object state:
       state
 
   private def established[F[_]: Concurrent, Auth, ConnectState, BindState, UDPAssociateState]
-                         (duplex: Connected[Auth, ConnectState] => Resource[F, (Pipe[F, Byte, Unit], Stream[F, Byte])])
+                         (tunnel: Connected[Auth, ConnectState] => Resource[F, (Pipe[F, Byte, Unit], Stream[F, Byte])])
                          (bound: Socks5PullState[F, Unit], udpAssociated: Socks5PullState[F, Unit])
   : Socks5PullState[F, Unit] =
     Socks5PullState.getS[F].flatMap {
-      case _: Connected[?, ?] => connected(duplex)
+      case _: Connected[?, ?] => connected(tunnel)
       case _: Bound[?, ?] => bound
       case _: UDPAssociated[?, ?] => udpAssociated
       case state => Socks5PullState.liftT[F, Unit](WrongClassTag[RespondedSuccessState[?, ?]](state))
     }
 
   private def connected[F[_]: Concurrent, Auth, ConnectState](
-    duplex: Connected[Auth, ConnectState] => Resource[F, (Pipe[F, Byte, Unit], Stream[F, Byte])]
+    tunnel: Connected[Auth, ConnectState] => Resource[F, (Pipe[F, Byte, Unit], Stream[F, Byte])]
   ): Socks5PullState[F, Unit] =
     for
       connected <- Socks5PullState.typedS[F, Connected[Auth, ConnectState]]
       _ <- Socks5PullState.pipe[F](in => Stream
-        .resource[F, (Pipe[F, Byte, Unit], Stream[F, Byte])](duplex(connected))
-        .flatMap((send, receive) => receive.concurrently(in.through(send)))
+        .resource[F, (Pipe[F, Byte, Unit], Stream[F, Byte])](tunnel(connected))
+        .flatMap((send, receive) => receive.mergeHaltBoth(in.through(send).drain))
       ).attempt
       _ <- Socks5PullState.setS(connected.closed)
     yield
