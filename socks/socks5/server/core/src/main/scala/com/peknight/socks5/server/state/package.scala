@@ -182,16 +182,16 @@ package object state:
     Socks5PullState.parse1[F, SocksVersion](version =>
       if version == socks5.code then socks5.asRight
       else UnsupportedSocksVersion(version).asLeft
-    )(Socks5VersionEmpty)
+    )(Socks5VersionEof)
 
   private def readMethods[F[_]]: Socks5PullState[F, List[Method]] =
-    Socks5PullState.mapSizedBytes[F, List[Method]](_.map(Method.apply).toList)(MethodEmpty)
+    Socks5PullState.mapSizedBytes[F, List[Method]](_.map(Method.apply).toList)(MethodEof)
 
   private def readPasswordAuth[F[_]](using Charset): Socks5PullState[F, UPassword] =
     for
       _ <- readPasswordVersion[F]
-      username <- Socks5PullState.readSizedString[F](UsernameEmpty)
-      password <- Socks5PullState.readSizedString[F](PasswordEmpty)
+      username <- Socks5PullState.readSizedString[F](UsernameEof)
+      password <- Socks5PullState.readSizedString[F](PasswordEof)
     yield
       UPassword(username, password)
 
@@ -199,7 +199,7 @@ package object state:
     Socks5PullState.parse1[F, Unit](version =>
       if version == version1.code then ().asRight
       else UnsupportedPasswordVersion(version).asLeft
-    )(PasswordVersionEmpty)
+    )(PasswordVersionEof)
 
   private def readRequest[F[_]](using Charset): Socks5PullState[F, Request] =
     for
@@ -214,13 +214,13 @@ package object state:
   private def readCommand[F[_]]: Socks5PullState[F, Command] =
     Socks5PullState.parse1[F, Command](cmd =>
       Command.values.find(_.code == cmd).toRight(UnsupportedCommand(cmd))
-    )(CommandEmpty)
+    )(CommandEof)
 
   private def readReserved[F[_]]: Socks5PullState[F, Unit] =
     Socks5PullState.parse1[F, Unit](rsv =>
       if rsv == Reserved.code then ().asRight
       else UnsupportedReserved(rsv).asLeft
-    )(ReservedEmpty)
+    )(ReservedEof)
 
   private def readAddress[F[_]](using Charset): Socks5PullState[F, Host] =
     for
@@ -235,28 +235,28 @@ package object state:
   private def readAddressType[F[_]]: Socks5PullState[F, AddressType] =
     Socks5PullState.parse1[F, AddressType](code =>
       AddressType.values.find(_.code == code).toRight(UnsupportedAddressType(code))
-    )(AddressTypeEmpty)
+    )(AddressTypeEof)
 
   private def readIpv4Address[F[_]]: Socks5PullState[F, Ipv4Address] =
     Socks5PullState.parseChunk[F, Ipv4Address](_.unconsN(4))(chunk =>
       Ipv4Address.fromBytes(chunk.toArray).toRight(IllegalIpv4Address(chunk.toByteVector))
-    )(Ipv4AddressEmpty)
+    )(Ipv4AddressEof)
 
   private def readDomainName[F[_]](using Charset): Socks5PullState[F, Hostname] =
     Socks5PullState.parseSizedString[F, Hostname](domainName =>
       Hostname.fromString(domainName).toRight(IllegalDomainName(domainName))
-    )(DomainNameEmpty)
+    )(DomainNameEof)
 
   private def readIpv6Address[F[_]]: Socks5PullState[F, Ipv6Address] =
     Socks5PullState.parseChunk[F, Ipv6Address](_.unconsN(16))(chunk =>
       Ipv6Address.fromBytes(chunk.toArray).toRight(IllegalIpv6Address(chunk.toByteVector))
-    )(Ipv6AddressEmpty)
+    )(Ipv6AddressEof)
 
   private def readPort[F[_]]: Socks5PullState[F, Port] =
     Socks5PullState.parseChunk[F, Port](_.unconsN(2)) { chunk =>
       val port = chunk.toByteVector.toInt()
       Port.fromInt(port).toRight(IllegalPort(port))
-    }(PortEmpty)
+    }(PortEof)
 
   private def writeSelected(state: State): ByteVector =
     state match
