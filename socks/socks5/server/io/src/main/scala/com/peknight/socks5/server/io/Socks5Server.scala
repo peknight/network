@@ -16,14 +16,14 @@ trait Socks5Server[F[_], Auth, ConnectState, BindState, UDPAssociateState](using
   def api: Socks5ServerApi[F, Auth, ConnectState, BindState, UDPAssociateState]
   def bindAndAccept: Stream[F, Socket[F]]
   def serve: Stream[F, Unit] =
-    bindAndAccept.flatMap(socket => state(api)
+    bindAndAccept.map(socket => state(api)
       .run((Initial(Connection(socket.address, socket.peerAddress)), socket.reads))
       .as(())
       .stream
       .through(socket.writes)
       .attempt
       .drain
-    )
+    ).parJoinUnbounded
 end Socks5Server
 object Socks5Server:
   private case class Socks5Server[F[_], Auth, ConnectState, BindState, UDPAssociateState](
