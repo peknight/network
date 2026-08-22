@@ -21,6 +21,8 @@ trait Socks5Server[F[_], Auth, ConnectState, BindState, UDPAssociateState](using
       .as(())
       .stream
       .through(socket.writes)
+      .attempt
+      .drain
     )
 end Socks5Server
 object Socks5Server:
