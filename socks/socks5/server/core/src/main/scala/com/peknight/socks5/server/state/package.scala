@@ -11,7 +11,6 @@ import com.peknight.cats.instances.eitherT.given
 import com.peknight.error.Error
 import com.peknight.error.std.WrongClassTag
 import com.peknight.error.syntax.either.value
-import com.peknight.fs2.pull.state.BytePullState
 import com.peknight.socks.SocksVersion
 import com.peknight.socks.SocksVersion.socks5
 import com.peknight.socks.server.error.UnsupportedSocksVersion
@@ -34,7 +33,7 @@ import java.nio.charset.Charset
 
 package object state:
 
-  type Socks5PullState[F[_], A] = BytePullState[F, State, Terminated, A]
+  type Socks5PullState[F[_], A] = Socks5PullState.PS[F, A]
   
   def state[F[_], Auth, ConnectState, BindState, UDPAssociateState]
            (api: Socks5ServerApi[F, Auth, ConnectState, BindState, UDPAssociateState])
