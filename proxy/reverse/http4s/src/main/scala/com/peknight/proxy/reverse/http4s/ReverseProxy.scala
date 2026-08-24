@@ -206,7 +206,7 @@ trait ReverseProxy:
           println(s"WebSocket|receive|binary|${data.toHex}|$last")
           WebSocketFrame.Binary(data, last).pure[F]
       }
-      .concurrently(in.through(scanS[F, WebSocketFrame, WebSocketFrame, WSFrame, Boolean](true) {
+      .mergeHaltBoth(in.through(scanS[F, WebSocketFrame, WebSocketFrame, WSFrame, Boolean](true) {
         case (last, frame: WebSocketFrame.Close) =>
           println(s"WebSocket|send|close|$last|${frame.data.toHex}|${frame.last}")
           (frame.last, WSFrame.Close(frame.closeCode, ""))
@@ -232,7 +232,7 @@ trait ReverseProxy:
           case _ =>
             println(s"WebSocket|send|${frame.getClass.getSimpleName}|false|${frame.data.toHex}|${frame.last}|binary")
             (true, WSFrame.Binary(frame.data, frame.last))
-      }).through(connection.sendPipe))
+      }).through(connection.sendPipe).drain)
       .onFinalize(release)
 
   extension [A] (option: Option[A])

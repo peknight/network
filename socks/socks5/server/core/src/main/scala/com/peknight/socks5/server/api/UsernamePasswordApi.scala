@@ -3,8 +3,8 @@ package com.peknight.socks5.server.api
 import cats.Applicative
 import cats.syntax.applicative.*
 import cats.syntax.either.*
-import com.peknight.socks5.State.UsernamePasswordAuthenticating
 import com.peknight.socks5.auth.password.Status.Failure
+import com.peknight.socks5.server.state.State.UsernamePasswordAuthenticating
 
 trait UsernamePasswordApi[F[_], Auth]:
   def usernamePassword(state: UsernamePasswordAuthenticating): F[Either[Failure, Auth]]

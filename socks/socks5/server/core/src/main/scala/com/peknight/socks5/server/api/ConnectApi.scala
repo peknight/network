@@ -3,7 +3,7 @@ package com.peknight.socks5.server.api
 import cats.Applicative
 import cats.effect.{MonadCancel, Resource}
 import com.peknight.socks5.Response
-import com.peknight.socks5.State.{Connected, Requested}
+import com.peknight.socks5.server.state.State.{Connected, Requested}
 import com.peknight.socks5.server.state.unsupportedCommand
 import fs2.{Pipe, Stream}
 

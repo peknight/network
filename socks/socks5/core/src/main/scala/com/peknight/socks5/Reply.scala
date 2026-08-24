@@ -1,9 +1,6 @@
 package com.peknight.socks5
 
-import com.peknight.error.Error
-import com.peknight.socks.error.SocksError
-import com.peknight.socks5.State.ErrorState
-import com.peknight.socks5.error.{UnsupportedAddressType, UnsupportedCommand}
+import com.peknight.socks5.error.Socks5Error
 
 sealed trait Reply derives CanEqual:
   def code: Byte
@@ -13,7 +10,7 @@ object Reply:
   case object Succeeded extends Reply:
     def code: Byte = 0x00
     def success: Boolean = true
-  sealed trait Failed extends Reply with SocksError
+  sealed trait Failed extends Reply with Socks5Error
   case object GeneralSocksServerFailure extends Reply with Failed:
     def code: Byte = 0x01
     override def lowPriorityMessage: Option[String] = Some("general SOCKS server failure")
@@ -65,15 +62,4 @@ object Reply:
     case 0x08 => AddressTypeNotSupported
     case code => Unassigned(code.toByte)
   def apply(value: Int): Reply = apply(value.toByte)
-
-  def fromError[E](error: E): Failed =
-    Error(error) match
-      case _: UnsupportedCommand => CommandNotSupported
-      case _: UnsupportedAddressType => AddressTypeNotSupported
-      case _ => GeneralSocksServerFailure
-  def fromState[E](state: State): Failed =
-    state match
-      case e: ErrorState => fromError(e.error)
-      case e: State.UnsupportedCommand[?] => CommandNotSupported
-      case _ => GeneralSocksServerFailure
 end Reply

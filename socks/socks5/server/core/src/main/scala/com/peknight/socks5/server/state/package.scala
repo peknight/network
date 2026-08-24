@@ -6,24 +6,27 @@ import cats.effect.kernel.Concurrent
 import cats.syntax.applicative.*
 import cats.syntax.either.*
 import com.comcast.ip4s.*
+import com.peknight.auth.{Password, User, UserPassword as UPassword}
 import com.peknight.cats.instances.eitherT.given
 import com.peknight.error.Error
 import com.peknight.error.std.WrongClassTag
 import com.peknight.error.syntax.either.value
+import com.peknight.fs2.pull.state.BytePullState
 import com.peknight.socks.SocksVersion
 import com.peknight.socks.SocksVersion.socks5
-import com.peknight.socks.error.UnsupportedSocksVersion
+import com.peknight.socks.server.error.UnsupportedSocksVersion
 import com.peknight.socks5.*
 import com.peknight.socks5.Command.{BIND, CONNECT, UDP_ASSOCIATE}
-import com.peknight.socks5.Socks5PullState.{attempt, outputS}
-import com.peknight.socks5.State.{NoAcceptableMethod as _, UnsupportedCommand as _, *}
 import com.peknight.socks5.auth.Method
 import com.peknight.socks5.auth.Method.*
 import com.peknight.socks5.auth.password.PasswordVersion.version1
+import com.peknight.socks5.auth.password.Status
 import com.peknight.socks5.auth.password.Status.{Failure, Success}
-import com.peknight.socks5.auth.password.{Status, UsernamePassword as UPassword}
-import com.peknight.socks5.error.*
 import com.peknight.socks5.server.api.Socks5ServerApi
+import com.peknight.socks5.server.error.*
+import com.peknight.socks5.server.state.Socks5PullState.{attempt, outputS}
+import com.peknight.socks5.server.state.State
+import com.peknight.socks5.server.state.State.{NoAcceptableMethod as _, UnsupportedCommand as _, *}
 import fs2.{Pipe, Pull, Stream}
 import scodec.bits.ByteVector
 
@@ -31,6 +34,8 @@ import java.nio.charset.Charset
 
 package object state:
 
+  type Socks5PullState[F[_], A] = BytePullState[F, State, Terminated, A]
+  
   def state[F[_], Auth, ConnectState, BindState, UDPAssociateState]
            (api: Socks5ServerApi[F, Auth, ConnectState, BindState, UDPAssociateState])
            (using Charset)(using Concurrent[F]): Socks5PullState[F, State] =
@@ -193,7 +198,7 @@ package object state:
       username <- Socks5PullState.readSizedString[F](UsernameEof)
       password <- Socks5PullState.readSizedString[F](PasswordEof)
     yield
-      UPassword(username, password)
+      UPassword(User(username), Password(password))
 
   private def readPasswordVersion[F[_]]: Socks5PullState[F, Unit] =
     Socks5PullState.parse1[F, Unit](version =>
@@ -273,7 +278,7 @@ package object state:
   private def writeResponse(state: State): ByteVector =
     val (response, addressBytes) = state match
       case s: RespondedState[?, ?] => (s.response, s.addressBytes)
-      case _ => (Response.fromState(state), writeIpAddress(Response.defaultHost))
+      case _ => (state.toResponse, writeIpAddress(Response.defaultHost))
     val addressTypeCode = AddressType.fromHost(response.address).code
     ByteVector(socks5.code, response.reply.code, Reserved.code, addressTypeCode) ++
       addressBytes ++

@@ -1,9 +1,9 @@
 package com.peknight.socks5.server.api
 
 import cats.Applicative
-import com.peknight.socks5.State.Requested
-import com.peknight.socks5.server.state.unsupportedCommand
-import com.peknight.socks5.{Response, Socks5PullState}
+import com.peknight.socks5.Response
+import com.peknight.socks5.server.state.State.Requested
+import com.peknight.socks5.server.state.{Socks5PullState, unsupportedCommand}
 
 trait BindApi[F[_], Auth, BindState]:
   def bind(state: Requested[Auth]): F[(Response, BindState)]

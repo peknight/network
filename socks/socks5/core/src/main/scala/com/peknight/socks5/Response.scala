@@ -14,6 +14,4 @@ object Response:
     Response(Succeeded, host, port)
   def failed(reply: Failed): Response = Response(reply, defaultHost, defaultPort)
   val unsupportedCommand: Response = failed(CommandNotSupported)
-  def fromError[E](error: E): Response = failed(Reply.fromError(error))
-  def fromState(state: State): Response = failed(Reply.fromState(state))
 end Response
