@@ -8,7 +8,7 @@ import com.comcast.ip4s.SocketAddress
 import com.peknight.socks5.Response
 import com.peknight.socks5.server.api.ConnectApi.ResourceConnectApi
 import com.peknight.socks5.server.error.toResponse
-import com.peknight.socks5.server.state.State.Requested
+import com.peknight.socks5.state.State.Requested
 import fs2.io.net.Network
 import fs2.{Pipe, Stream}
 

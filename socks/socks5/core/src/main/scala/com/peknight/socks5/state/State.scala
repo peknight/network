@@ -1,12 +1,11 @@
-package com.peknight.socks5.server.state
+package com.peknight.socks5.state
 
 import com.peknight.auth.UserPassword
 import com.peknight.socks.Connection
-import com.peknight.socks5.Reply.{CommandNotSupported, Failed, GeneralSocksServerFailure}
 import com.peknight.socks5.auth.Method
 import com.peknight.socks5.auth.Method.*
 import com.peknight.socks5.auth.password.Status.Failure
-import com.peknight.socks5.server.state.State.{ErrorState, Terminated, UnsupportedCommand}
+import com.peknight.socks5.state.State.Terminated
 import com.peknight.socks5.{Request, Response}
 import scodec.bits.ByteVector
 
@@ -14,12 +13,6 @@ sealed trait State:
   def connection: Connection
   def terminated: Boolean
   private[socks5] def error(error: Throwable): Terminated
-  private[socks5] def toFailed: Failed =
-    this match
-      case e: ErrorState => com.peknight.socks5.server.error.toFailed(e.error)
-      case e: UnsupportedCommand[?] => CommandNotSupported
-      case _ => GeneralSocksServerFailure
-  private[socks5] def toResponse: Response = Response.failed(toFailed)
 end State
 object State:
   // 初始状态

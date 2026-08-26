@@ -5,8 +5,8 @@ import com.comcast.ip4s.{GenSocketAddress, SocketAddress}
 import com.peknight.cats.instances.eitherT.given
 import com.peknight.socks.Connection
 import com.peknight.socks5.server.api.Socks5ServerApi
-import com.peknight.socks5.server.state.State.Initial
-import com.peknight.socks5.server.state.state
+import com.peknight.socks5.server.state.ServerPullState
+import com.peknight.socks5.state.State.Initial
 import fs2.io.net.{Network, Socket, SocketOption}
 import fs2.{Pull, Stream}
 
@@ -16,7 +16,7 @@ trait Socks5Server[F[_], Auth, ConnectState, BindState, UDPAssociateState](using
   def api: Socks5ServerApi[F, Auth, ConnectState, BindState, UDPAssociateState]
   def bindAndAccept: Stream[F, Socket[F]]
   def serve: Stream[F, Unit] =
-    bindAndAccept.map(socket => state(api)
+    bindAndAccept.map(socket => ServerPullState(api)
       .run((Initial(Connection(socket.address, socket.peerAddress)), socket.reads))
       .as(())
       .stream

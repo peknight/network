@@ -4,7 +4,7 @@ import cats.Applicative
 import cats.syntax.applicative.*
 import cats.syntax.either.*
 import com.peknight.socks5.auth.Method.{AuthRequiredMethod, NoAcceptableMethod, NoAuthenticationRequired}
-import com.peknight.socks5.server.state.State.Negotiating
+import com.peknight.socks5.state.State.Negotiating
 
 trait NegotiationApi[F[_], Auth]:
   def negotiation(state: Negotiating): F[Either[NoAcceptableMethod.type | AuthRequiredMethod, Auth]]
