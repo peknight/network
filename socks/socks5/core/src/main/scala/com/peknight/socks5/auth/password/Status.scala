@@ -7,6 +7,10 @@ sealed trait Status derives CanEqual:
   def success: Boolean
 end Status
 object Status:
+  def apply(code: Byte): Status =
+    code match
+      case 0x00 => Success
+      case _ => Failure(code)
   case object Success extends Status:
     def code: Byte = 0x00
     def success: Boolean = true

@@ -12,7 +12,7 @@ import scala.concurrent.duration.*
 
 class Socks5ServerFlatSpec extends AsyncFlatSpec with AsyncIOSpec:
   "Socks5 Server" should "pass" in {
-    val socks5ServerApi = Socks5ServerApi[IO, Unit, Resource[IO, (Pipe[IO, Byte, Unit], Stream[IO, Byte])], Unit, Unit](
+    val socks5ServerApi = ServerApi[IO, Unit, Resource[IO, (Pipe[IO, Byte, Unit], Stream[IO, Byte])], Unit, Unit](
       NegotiationApi.noAuthenticationRequired[IO],
       UsernamePasswordApi.unsupported[IO, Unit],
       GSSApiApi.unsupported[IO, Unit],

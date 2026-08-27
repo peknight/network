@@ -132,7 +132,9 @@ object State:
     private[socks5] def passwordUnsafe(userPassword: UserPassword): UsernamePasswordAuthenticating =
       UsernamePasswordAuthenticating(userPassword, methods, connection)
     private[socks5] def unsupportedMethod: UnsupportedMethod = UnsupportedMethod(selected, methods, connection)
-    private[socks5] def error(error: Throwable): Terminated = AuthenticationError(selected, methods, connection, error)
+    private[socks5] def error(error: Throwable): Terminated = error match
+      case com.peknight.socks5.error.UnsupportedMethod(_) => UnsupportedMethod(selected, methods, connection)
+      case _ => AuthenticationError(selected, methods, connection, error)
   end AuthRequiredMethodSelected
   // 不支持的方法
   case class UnsupportedMethod private[socks5] (selected: AcceptableMethod, methods: List[Method],

@@ -118,9 +118,20 @@ lazy val socks5ServerIO = (projectMatrix in file("socks/socks5/server/io"))
 lazy val socks5Client = (project in file("socks/socks5/client"))
   .settings(name := "socks5-client")
   .aggregate(socks5ClientCore.projectRefs *)
+  .aggregate(socks5ClientIO.projectRefs *)
 
 lazy val socks5ClientCore = (projectMatrix in file("socks/socks5/client/core"))
   .dependsOn(socks5Core, socksClientCore)
   .settings(name := "socks5-client-core")
   .jvmPlatform(scalaVersions = Seq(scala.scala3.version))
   .jsPlatform(scalaVersions = Seq(scala.scala3.version))
+
+lazy val socks5ClientIO = (projectMatrix in file("socks/socks5/client/io"))
+  .dependsOn(socks5ClientCore)
+  .settings(name := "socks5-client-io")
+  .settings(libraryDependencies ++= dependencies(
+    fs2.io,
+  ))
+  .jvmPlatform(scalaVersions = Seq(scala.scala3.version))
+  .jsPlatform(scalaVersions = Seq(scala.scala3.version))
+

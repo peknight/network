@@ -3,6 +3,7 @@ package com.peknight.socks5.server
 import com.peknight.error.Error
 import com.peknight.socks5.Reply.{AddressTypeNotSupported, CommandNotSupported, Failed, GeneralSocksServerFailure}
 import com.peknight.socks5.Response
+import com.peknight.socks5.error.{UnsupportedAddressType, UnsupportedCommand}
 import com.peknight.socks5.state.State
 import com.peknight.socks5.state.State.ErrorState
 
