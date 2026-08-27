@@ -2,7 +2,6 @@ package com.peknight.socks5.client.state
 
 import cats.ApplicativeError
 import cats.effect.{Concurrent, Resource}
-import fs2.{Pipe, Stream}
 import cats.syntax.applicativeError.*
 import com.comcast.ip4s.{Ipv4Address, Ipv6Address}
 import com.peknight.auth.UserPassword
@@ -21,6 +20,7 @@ import com.peknight.socks5.client.api.ClientApi
 import com.peknight.socks5.client.error.{MethodEof, ReplyEof, StatusEof}
 import com.peknight.socks5.state.State.{NoAcceptableMethod as _, *}
 import com.peknight.socks5.state.{PullStateDsl, State}
+import fs2.{Pipe, Stream}
 import scodec.bits.ByteVector
 
 import java.nio.charset.Charset
@@ -37,7 +37,7 @@ object ClientPullState extends PullStateDsl:
           api.gssApiApi.gssApi, api.ianaAssignedApi.ianaAssigned, api.privateMethodApi.privateMethod)
         _ <- request[F, Auth, ConnectState, BindState, UDPAssociateState](api.requestApi.request)(
           api.connectApi.connect)(api.bindApi.bind)(api.udpAssociateApi.udpAssociate)
-        _ <- established[F, Auth, ConnectState, BindState, UDPAssociateState](api.bindApi.bound,
+        _ <- established[F, Auth, ConnectState, BindState, UDPAssociateState](api.connectApi.tunnel)(api.bindApi.bound,
           api.udpAssociateApi.udpAssociated)
         state <- getS[F]
       yield
@@ -139,26 +139,28 @@ object ClientPullState extends PullStateDsl:
       state
 
   private def established[F[_] : Concurrent, Auth, ConnectState, BindState, UDPAssociateState]
+                         (tunnel: Connected[Auth, ConnectState] => Resource[F, (Pipe[F, Byte, Unit], Stream[F, Byte])])
                          (bound: Aux[F, Unit], udpAssociated: Aux[F, Unit])
   : Aux[F, Unit] =
     getS[F].flatMap {
-      case _: Connected[?, ?] => ???
+      case _: Connected[?, ?] => connected(tunnel)
       case _: Bound[?, ?] => bound
       case _: UDPAssociated[?, ?] => udpAssociated
       case state => liftT[F, Unit](WrongClassTag[RespondedSuccessState[?, ?]](state))
     }
 
-  private def connected[F[_]: Concurrent, Auth, ConnectState]
-                       (input: Connected[Auth, ConnectState] => Stream[F, Byte])
-                       (tunnel: Connected[Auth, ConnectState] => Resource[F, (Pipe[F, Byte, Unit], Stream[F, Byte])])
-  : Aux[F, Stream[F, Byte]] =
+  private def connected[F[_]: Concurrent, Auth, ConnectState](
+    tunnel: Connected[Auth, ConnectState] => Resource[F, (Pipe[F, Byte, Unit], Stream[F, Byte])]
+  ): Aux[F, Unit] =
     for
       connected <- typedS[F, Connected[Auth, ConnectState]]
-      _ <- pipe[F](out => Stream.resource(tunnel(connected))
-        .flatMap((send, receive) => input(connected)))
+      _ = pipe[F](output => Stream
+        .resource[F, (Pipe[F, Byte, Unit], Stream[F, Byte])](tunnel(connected))
+        .flatMap((publish, input) => input.mergeHaltBoth(output.through(publish).drain))
+      ).attempt
       _ <- setS(connected.closed)
     yield
-      ???
+      ()
 
   private def readNegotiation[F[_]]: Aux[F, Method] =
     for

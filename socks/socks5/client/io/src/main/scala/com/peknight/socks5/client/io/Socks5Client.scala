@@ -7,8 +7,8 @@ import com.peknight.socks.Connection
 import com.peknight.socks5.client.api.ClientApi
 import com.peknight.socks5.client.state.ClientPullState
 import com.peknight.socks5.state.State.Initial
+import fs2.Stream
 import fs2.io.net.{Network, Socket, SocketOption}
-import fs2.{Pipe, Stream}
 
 import java.nio.charset.{Charset, StandardCharsets}
 
