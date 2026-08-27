@@ -16,6 +16,8 @@ import fs2.text.utf8
 import fs2.{Pipe, Stream}
 import org.scalatest.flatspec.AsyncFlatSpec
 
+import scala.concurrent.duration.*
+
 class Socks5FlatSpec extends AsyncFlatSpec with AsyncIOSpec:
   "Socks5 Server" should "pass" in {
 
@@ -53,10 +55,11 @@ class Socks5FlatSpec extends AsyncFlatSpec with AsyncIOSpec:
         client.api.BindApi.unsupported[IO, Unit],
         client.api.UDPAssociateApi.unsupported[IO, Unit]
       )
-      topic.subscribeUnbounded.mergeHaltBoth(Socks5Client(socks5ClientApi, SocketAddress(localhost, serverPort)).run)
+      topic.subscribeUnbounded.concurrently(Socks5Client(socks5ClientApi, SocketAddress(localhost, serverPort)).run)
     }
     stream.through(utf8.decode[IO])
-      .mergeHaltBoth(service.mergeHaltBoth(serve))
+      .concurrently(service.concurrently(serve))
+      .interruptAfter(5.seconds)
       .compile
       .toList
       .map(_.mkString)
