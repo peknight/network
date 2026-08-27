@@ -38,7 +38,8 @@ object Socks5Server:
   def apply[F[_], Auth, ConnectState, BindState, UDPAssociateState](
     api: ServerApi[F, Auth, ConnectState, BindState, UDPAssociateState],
     address: GenSocketAddress = SocketAddress.Wildcard,
-    options: List[SocketOption] = Nil, charset: Charset = StandardCharsets.UTF_8)(using Async[F], Network[F])
+    options: List[SocketOption] = Nil, charset: Charset = StandardCharsets.UTF_8
+  )(using Async[F], Network[F])
   : com.peknight.socks5.server.io.Socks5Server[F, Auth, ConnectState, BindState, UDPAssociateState] =
     Socks5Server(api, address, options)
 end Socks5Server

@@ -1,7 +1,8 @@
 package com.peknight.socks5.client.state
 
 import cats.ApplicativeError
-import cats.effect.Concurrent
+import cats.effect.{Concurrent, Resource}
+import fs2.{Pipe, Stream}
 import cats.syntax.applicativeError.*
 import com.comcast.ip4s.{Ipv4Address, Ipv6Address}
 import com.peknight.auth.UserPassword
@@ -141,19 +142,23 @@ object ClientPullState extends PullStateDsl:
                          (bound: Aux[F, Unit], udpAssociated: Aux[F, Unit])
   : Aux[F, Unit] =
     getS[F].flatMap {
-      case _: Connected[?, ?] => connected
+      case _: Connected[?, ?] => ???
       case _: Bound[?, ?] => bound
       case _: UDPAssociated[?, ?] => udpAssociated
       case state => liftT[F, Unit](WrongClassTag[RespondedSuccessState[?, ?]](state))
     }
 
-  private def connected[F[_] : Concurrent, Auth, ConnectState]: Aux[F, Unit] =
+  private def connected[F[_]: Concurrent, Auth, ConnectState]
+                       (input: Connected[Auth, ConnectState] => Stream[F, Byte])
+                       (tunnel: Connected[Auth, ConnectState] => Resource[F, (Pipe[F, Byte, Unit], Stream[F, Byte])])
+  : Aux[F, Stream[F, Byte]] =
     for
       connected <- typedS[F, Connected[Auth, ConnectState]]
-      // TODO
+      _ <- pipe[F](out => Stream.resource(tunnel(connected))
+        .flatMap((send, receive) => input(connected)))
       _ <- setS(connected.closed)
     yield
-      ()
+      ???
 
   private def readNegotiation[F[_]]: Aux[F, Method] =
     for
