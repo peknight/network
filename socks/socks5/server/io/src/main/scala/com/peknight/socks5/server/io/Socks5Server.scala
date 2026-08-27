@@ -15,7 +15,7 @@ import java.nio.charset.{Charset, StandardCharsets}
 trait Socks5Server[F[_], Auth, ConnectState, BindState, UDPAssociateState](using Charset)(using Async[F]):
   def api: ServerApi[F, Auth, ConnectState, BindState, UDPAssociateState]
   def bindAndAccept: Stream[F, Socket[F]]
-  def serve: Stream[F, Unit] =
+  def serve: Stream[F, Nothing] =
     bindAndAccept.map(socket => ServerPullState(api)
       .run((Initial(Connection(socket.address, socket.peerAddress)), socket.reads))
       .as(())

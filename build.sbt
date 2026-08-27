@@ -108,10 +108,6 @@ lazy val socks5ServerIO = (projectMatrix in file("socks/socks5/server/io"))
   .settings(libraryDependencies ++= dependencies(
     fs2.io,
   ))
-  .settings(libraryDependencies ++= testDependencies(
-    scalaTest.flatSpec,
-    typelevel.catsEffect.testingScalaTest,
-  ))
   .jvmPlatform(scalaVersions = Seq(scala.scala3.version))
   .jsPlatform(scalaVersions = Seq(scala.scala3.version))
 
@@ -127,10 +123,17 @@ lazy val socks5ClientCore = (projectMatrix in file("socks/socks5/client/core"))
   .jsPlatform(scalaVersions = Seq(scala.scala3.version))
 
 lazy val socks5ClientIO = (projectMatrix in file("socks/socks5/client/io"))
-  .dependsOn(socks5ClientCore)
+  .dependsOn(
+    socks5ClientCore,
+    socks5ServerIO % Test,
+  )
   .settings(name := "socks5-client-io")
   .settings(libraryDependencies ++= dependencies(
     fs2.io,
+  ))
+  .settings(libraryDependencies ++= testDependencies(
+    scalaTest.flatSpec,
+    typelevel.catsEffect.testingScalaTest,
   ))
   .jvmPlatform(scalaVersions = Seq(scala.scala3.version))
   .jsPlatform(scalaVersions = Seq(scala.scala3.version))
