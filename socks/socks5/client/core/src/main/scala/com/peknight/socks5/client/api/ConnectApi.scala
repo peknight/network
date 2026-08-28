@@ -3,6 +3,7 @@ package com.peknight.socks5.client.api
 import cats.effect.Resource
 import cats.effect.std.Queue
 import cats.syntax.applicative.*
+import cats.syntax.functor.*
 import cats.syntax.option.*
 import cats.{Applicative, ApplicativeError}
 import com.peknight.socks.Socket
@@ -18,7 +19,7 @@ object ConnectApi:
   private case class QueueConnectApi[F[_]: Applicative, Auth](reads: Stream[F, Byte], queue: Queue[F, Option[Chunk[Byte]]])
     extends ConnectApi[F, Auth, (Stream[F, Byte], Queue[F, Option[Chunk[Byte]]])]:
     def connect(state: Requested[F, Auth], response: Response): F[(Stream[F, Byte], Queue[F, Option[Chunk[Byte]]])] =
-      (reads, queue).pure[F]
+      if response.reply.success then (reads, queue).pure[F] else queue.offer(None).as((Stream.empty, queue))
     def tunnel(state: Connected[F, Auth, (Stream[F, Byte], Queue[F, Option[Chunk[Byte]]])]): Resource[F, Socket[F]] =
       Resource.pure(Socket(state.state._1,
         in => in.chunks.evalMap(chunk => queue.offer(chunk.some)).onFinalize(queue.offer(None)).drain,

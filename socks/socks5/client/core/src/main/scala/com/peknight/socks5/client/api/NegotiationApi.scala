@@ -13,7 +13,7 @@ end NegotiationApi
 object NegotiationApi:
   private case class NegotiationApi[F[_]: Applicative, Auth](methods: List[Method], noAuthenticationRequiredAuth: Auth)
     extends com.peknight.socks5.client.api.NegotiationApi[F, Auth]:
-    def negotiation(state: Initial[F]): F[List[Method]] = List(NoAuthenticationRequired).pure[F]
+    def negotiation(state: Initial[F]): F[List[Method]] = methods.pure[F]
     def noAuthenticationRequired(state: Negotiating[F]): F[Auth] = noAuthenticationRequiredAuth.pure[F]
   end NegotiationApi
   private class NoAuthenticationRequiredNegotiationApi[F[_]: Applicative]
