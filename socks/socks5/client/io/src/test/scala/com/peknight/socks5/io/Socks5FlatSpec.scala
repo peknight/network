@@ -62,7 +62,7 @@ class Socks5FlatSpec extends AsyncFlatSpec with AsyncIOSpec:
         client.api.UDPAssociateApi.unsupported[IO, Unit]
       )
       Socks5Client(socks5ClientApi, SocketAddress(localhost, serverPort)).resource
-        .map(stream => topic.subscribeUnbounded.concurrently(stream))
+        .map(stream => topic.subscribeUnbounded.merge(stream))
     }
 
     val resource: Resource[IO, Stream[IO, Byte]] =
