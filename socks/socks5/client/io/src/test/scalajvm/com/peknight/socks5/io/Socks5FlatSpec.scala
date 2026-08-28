@@ -1,7 +1,9 @@
 package com.peknight.socks5.io
 
+import cats.effect.std.Queue
 import cats.effect.testing.scalatest.AsyncIOSpec
 import cats.effect.{IO, Resource}
+import cats.syntax.option.*
 import com.comcast.ip4s.*
 import com.peknight.socks5.Command.CONNECT
 import com.peknight.socks5.client.api.ClientApi
@@ -10,10 +12,9 @@ import com.peknight.socks5.server.api.ServerApi
 import com.peknight.socks5.server.io.Socks5Server
 import com.peknight.socks5.server.io.api.DirectConnectApi
 import com.peknight.socks5.{Request, client, server}
-import fs2.concurrent.Topic
 import fs2.io.net.Network
 import fs2.text.utf8
-import fs2.{Pipe, Stream}
+import fs2.{Chunk, Pipe, Stream}
 import org.scalatest.flatspec.AsyncFlatSpec
 
 import java.time.LocalDateTime
@@ -72,7 +73,7 @@ class Socks5FlatSpec extends AsyncFlatSpec with AsyncIOSpec:
       Socks5Server(socks5ServerApi, SocketAddress.port(serverPort)).resource
 
     val clientR: Resource[IO, Stream[IO, Byte]] =
-      Resource.eval(Topic[IO, Byte]).flatMap { topic =>
+      Resource.eval(Queue.unbounded[IO, Option[Chunk[Byte]]]).flatMap { queue =>
         val socks5ClientApi = ClientApi[IO, Unit, Resource[IO, (Pipe[IO, Byte, Unit], Stream[IO, Byte])], Unit, Unit](
           client.api.NegotiationApi.noAuthenticationRequired[IO],
           client.api.UsernamePasswordApi.unsupported[IO, Unit],
@@ -80,12 +81,15 @@ class Socks5FlatSpec extends AsyncFlatSpec with AsyncIOSpec:
           client.api.IANAAssignedApi.unsupported[IO, Unit],
           client.api.PrivateMethodApi.unsupported[IO, Unit],
           client.api.RequestApi[IO, Unit](Request(CONNECT, localHost, servicePort)),
-          client.api.ConnectApi[IO, Unit](input, in => in.through(topic.publish).onFinalize(IO.delay(println(s"${LocalDateTime.now} topic publish finalized")))),
+          client.api.ConnectApi[IO, Unit](input, in => in.chunks
+            .evalMap(chunk => queue.offer(chunk.some))
+            .onFinalize(queue.offer(None))
+            .onFinalize(IO.delay(println(s"${LocalDateTime.now} queue offer finalized")))),
           client.api.BindApi.unsupported[IO, Unit],
           client.api.UDPAssociateApi.unsupported[IO, Unit]
         )
         Socks5Client(socks5ClientApi, serverAddress).resource
-          .map(stream => topic.subscribeUnbounded
+          .map(stream => Stream.fromQueueNoneTerminatedChunk(queue)
             .observe(in => in.through(utf8.decode).evalTap(s => IO.println(s"${LocalDateTime.now} subscribe read: $s")).drain)
             .onFinalize(IO.delay(println(s"${LocalDateTime.now} client spec subscribe finalized")))
             .merge(stream.onFinalize(IO.delay(println(s"${LocalDateTime.now} client spec stream finalized"))))
