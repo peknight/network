@@ -19,7 +19,6 @@ class Socks5FlatSpec extends AsyncFlatSpec with AsyncIOSpec:
     val servicePort: Port = port"8796"
     val serverPort: Port = port"1798"
     val text: String = "Hello, Socks5!"
-    val input: Stream[IO, Byte] = Stream[IO, String](text).through(utf8.encode[IO])
     val serviceR: Resource[IO, Stream[IO, Nothing]] =
       Network[IO].bind(SocketAddress.port(servicePort)).map(serverSocket => serverSocket.accept.map(socket => socket
         .reads
