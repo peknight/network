@@ -12,7 +12,7 @@ import com.peknight.socks.SocksVersion.socks5
 import com.peknight.socks.error.UnsupportedSocksVersion
 import com.peknight.socks5.auth.password.PasswordVersion.version1
 import com.peknight.socks5.error.*
-import com.peknight.socks5.state.State.{AuthRequiredMethodSelected, Requested, Terminated}
+import com.peknight.socks5.state.State.Terminated
 import com.peknight.socks5.{AddressType, Reserved}
 import scodec.bits.ByteVector
 
@@ -23,76 +23,62 @@ import scala.reflect.ClassTag
  * SOCKS5 状态机专用的 [[BytePullStateErrorDsl]]：
  * 固定 `S = State`、`E = Terminated`，底层 `Throwable` 统一通过 `State.error` 提升。
  */
-trait PullStateDsl extends BytePullStateErrorDsl[State, Terminated]:
+trait PullStateDsl[F[_]] extends BytePullStateErrorDsl[F, State[F], Terminated[F]]:
 
-  def unsupportedMethod[F[_], A]: Aux[F, A] =
-    for
-      state <- typedS[F, AuthRequiredMethodSelected]
-      a <- liftL[F, A](state.unsupportedMethod)
-    yield
-      a
-
-  def unsupportedCommand[F[_], A]: Aux[F, A] =
-    for
-      state <- typedS[F, Requested[?]]
-      a <- liftL[F, A](state.unsupportedCommand)
-    yield
-      a
-
-  private[socks5] def readSocks5Version[F[_]]: Aux[F, SocksVersion] =
-    parse1[F, SocksVersion](version =>
+  private[socks5] def readSocks5Version: Aux[SocksVersion] =
+    parse1[SocksVersion](version =>
       if version == socks5.code then socks5.asRight
       else UnsupportedSocksVersion(version).asLeft
     )(Socks5VersionEof)
 
-  private[socks5] def readPasswordVersion[F[_]]: Aux[F, Unit] =
-    parse1[F, Unit](version =>
+  private[socks5] def readPasswordVersion: Aux[Unit] =
+    parse1[Unit](version =>
       if version == version1.code then ().asRight
       else UnsupportedPasswordVersion(version).asLeft
     )(PasswordVersionEof)
 
-  private[socks5] def readReserved[F[_]]: Aux[F, Unit] =
-    parse1[F, Unit](rsv =>
+  private[socks5] def readReserved: Aux[Unit] =
+    parse1[Unit](rsv =>
       if rsv == Reserved.code then ().asRight
       else UnsupportedReserved(rsv).asLeft
     )(ReservedEof)
 
-  private[socks5] def readAddress[F[_]](using Charset): Aux[F, (Host, ByteVector)] =
+  private[socks5] def readAddress(using Charset): Aux[(Host, ByteVector)] =
     for
-      addressType <- readAddressType[F]
+      addressType <- readAddressType
       addressTuple <- addressType match
-        case AddressType.Ipv4Address => readIpv4Address[F]
-        case AddressType.DomainName => readDomainName[F]
-        case AddressType.Ipv6Address => readIpv6Address[F]
+        case AddressType.Ipv4Address => readIpv4Address
+        case AddressType.DomainName => readDomainName
+        case AddressType.Ipv6Address => readIpv6Address
     yield
       addressTuple
 
-  private def readAddressType[F[_]]: Aux[F, AddressType] =
-    parse1[F, AddressType](code =>
+  private def readAddressType: Aux[AddressType] =
+    parse1[AddressType](code =>
       AddressType.values.find(_.code == code).toRight(UnsupportedAddressType(code))
     )(AddressTypeEof)
 
-  private def readIpv4Address[F[_]]: Aux[F, (Ipv4Address, ByteVector)] =
-    parseChunk[F, (Ipv4Address, ByteVector)](_.unconsN(4))(chunk =>
+  private def readIpv4Address: Aux[(Ipv4Address, ByteVector)] =
+    parseChunk[(Ipv4Address, ByteVector)](_.unconsN(4))(chunk =>
       Ipv4Address.fromBytes(chunk.toArray)
         .map((_, chunk.toByteVector))
         .toRight(IllegalIpv4Address(chunk.toByteVector))
     )(Ipv4AddressEof)
 
-  private def readDomainName[F[_]](using Charset): Aux[F, (Hostname, ByteVector)] =
-    parseSizedStringBytes[F, Hostname](domainName =>
+  private def readDomainName(using Charset): Aux[(Hostname, ByteVector)] =
+    parseSizedStringBytes[Hostname](domainName =>
       Hostname.fromString(domainName).toRight(IllegalDomainName(domainName))
     )(DomainNameEof)
 
-  private def readIpv6Address[F[_]]: Aux[F, (Ipv6Address, ByteVector)] =
-    parseChunk[F, (Ipv6Address, ByteVector)](_.unconsN(16))(chunk =>
+  private def readIpv6Address: Aux[(Ipv6Address, ByteVector)] =
+    parseChunk[(Ipv6Address, ByteVector)](_.unconsN(16))(chunk =>
       Ipv6Address.fromBytes(chunk.toArray)
         .map((_, chunk.toByteVector))
         .toRight(IllegalIpv6Address(chunk.toByteVector))
     )(Ipv6AddressEof)
 
-  private[socks5] def readPort[F[_]]: Aux[F, Port] =
-    parseChunk[F, Port](_.unconsN(2)) { chunk =>
+  private[socks5] def readPort: Aux[Port] =
+    parseChunk[Port](_.unconsN(2)) { chunk =>
       val port = chunk.toByteVector.toInt(signed = false)
       Port.fromInt(port).toRight(IllegalPort(port))
     }(PortEof)
@@ -106,23 +92,23 @@ trait PullStateDsl extends BytePullStateErrorDsl[State, Terminated]:
 
   private[socks5] def encodePort(port: Port): ByteVector = ByteVector.fromInt(port.value, 2)
 
-  def error(state: State, throwable: Throwable): Terminated = state.error(throwable)
+  def error(state: State[F], throwable: Throwable): Terminated[F] = state.error(throwable)
 
-  override def setS[F[_]](s: State): Aux[F, Unit] =
+  override def setS(s: State[F]): Aux[Unit] =
     s match
-      case terminated: Terminated => liftL(terminated)
+      case terminated: Terminated[F] => liftL(terminated)
       case state => super.setS(state)
 
-  def typed[F[_], A: ClassTag](any: Any): Aux[F, A] =
-    super.typed[F, Any, A](any)((s, a) => s.error(WrongClassTag[A](a)))
+  def typed[A: ClassTag](any: Any): Aux[A] =
+    super.typed[Any, A](any)((s, a) => s.error(WrongClassTag[A](a)))
 
-  def typedS[F[_], A: ClassTag]: Aux[F, A] =
+  def typedS[A: ClassTag]: Aux[A] =
     super.typedS(s => s.error(WrongClassTag[A](s)))
 
-  private def parseSizedStringBytes[F[_], A](f: String => Either[Throwable, A])(eof: => Throwable)(using Charset)
-  : Aux[F, (A, ByteVector)] =
+  private def parseSizedStringBytes[A](f: String => Either[Throwable, A])(eof: => Throwable)(using Charset)
+  : Aux[(A, ByteVector)] =
     for
-      bytes <- readSizedBytes[F](eof)
+      bytes <- readSizedBytes(eof)
       value <- liftET(bytes.toByteVector.decodeString.flatMap(f))
     yield
       (value, bytes.toByteVector)
@@ -130,8 +116,12 @@ trait PullStateDsl extends BytePullStateErrorDsl[State, Terminated]:
   def encodeSizedString(value: String)(using Charset): Either[Error, ByteVector] =
     ByteVector.encodeString(value).value(value).map(bytes => bytes.length.toByte +: bytes)
 
-  extension [F[_]](state: Aux[F, State])
-    def outputS(f: State => ByteVector): Aux[F, State] =
-      state.attempt.outputE(either => f(either.fold[State](identity, identity)))
+  extension (state: Aux[State[F]])
+    def outputS(f: State[F] => ByteVector): Aux[State[F]] =
+      state.attempt.outputE(either => f(either.fold[State[F]](identity, identity)))
   end extension
+end PullStateDsl
+object PullStateDsl:
+  private class PullStateDsl[F[_]] extends com.peknight.socks5.state.PullStateDsl[F]
+  def apply[F[_]]: com.peknight.socks5.state.PullStateDsl[F] = new PullStateDsl[F]
 end PullStateDsl

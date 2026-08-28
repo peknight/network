@@ -18,7 +18,8 @@ trait Socks5Server[F[_], Auth, ConnectState, BindState, UDPAssociateState](using
   def bind: Resource[F, ServerSocket[F]]
   def resource: Resource[F, Stream[F, Nothing]] =
     bind.map(serverSocket => serverSocket.accept.map(socket => ServerPullState(api)
-      .run((Initial(Connection(socket.address, socket.peerAddress)), socket.reads))
+      .run((Initial(Connection(socket.address, socket.peerAddress, socket.endOfInput, socket.endOfOutput)),
+        socket.reads))
       .as(())
       .stream
       .onFinalize(Async[F].delay(println(s"${LocalDateTime.now} server resource stream finalized")))

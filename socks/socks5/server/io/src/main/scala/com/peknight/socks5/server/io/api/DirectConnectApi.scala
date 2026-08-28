@@ -13,7 +13,7 @@ import fs2.io.net.Network
 import fs2.{Pipe, Stream}
 
 class DirectConnectApi[F[_]: {Async, Network}, Auth] extends ResourceConnectApi[F, Auth]:
-  def connect(state: Requested[Auth]): F[(Response, Resource[F, (Pipe[F, Byte, Unit], Stream[F, Byte])])] =
+  def connect(state: Requested[F, Auth]): F[(Response, Resource[F, (Pipe[F, Byte, Unit], Stream[F, Byte])])] =
     Network[F].connect(SocketAddress(state.request.address, state.request.port))
       .allocated
       .attempt

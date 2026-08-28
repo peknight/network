@@ -7,11 +7,11 @@ import com.peknight.socks5.auth.password.Status.Failure
 import com.peknight.socks5.state.State.UsernamePasswordAuthenticating
 
 trait UsernamePasswordApi[F[_], Auth]:
-  def usernamePassword(state: UsernamePasswordAuthenticating): F[Either[Failure, Auth]]
+  def usernamePassword(state: UsernamePasswordAuthenticating[F]): F[Either[Failure, Auth]]
 end UsernamePasswordApi
 object UsernamePasswordApi:
   private class UnsupportedUsernamePasswordApi[F[_]: Applicative, Auth] extends UsernamePasswordApi[F, Auth]:
-    def usernamePassword(state: UsernamePasswordAuthenticating): F[Either[Failure, Auth]] =
+    def usernamePassword(state: UsernamePasswordAuthenticating[F]): F[Either[Failure, Auth]] =
       Failure.default.asLeft[Auth].pure[F]
   end UnsupportedUsernamePasswordApi
   def unsupported[F[_]: Applicative, Auth]: UsernamePasswordApi[F, Auth] = new UnsupportedUsernamePasswordApi[F, Auth]

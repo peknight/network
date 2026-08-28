@@ -29,8 +29,11 @@ class Socks5FlatSpec extends AsyncFlatSpec with AsyncIOSpec:
       Network[IO].bind(SocketAddress.port(servicePort))
         .map(serverSocket => serverSocket.accept
           .map(socket => socket.reads
+            .observe(in => in.through(utf8.decode).evalTap(s => IO.println(s"service read: $s")).drain)
+            .onFinalize(socket.endOfInput)
             .onFinalize(IO.delay(println(s"${LocalDateTime.now} service read finalized")))
             .through(socket.writes)
+            .onFinalize(socket.endOfOutput)
             .onFinalize(IO.delay(println(s"${LocalDateTime.now} service writes finalized")))
             .drain)
           .parJoinUnbounded
@@ -41,10 +44,14 @@ class Socks5FlatSpec extends AsyncFlatSpec with AsyncIOSpec:
 
     val directR: Resource[IO, Stream[IO, Byte]] = Network[IO].connect(serviceAddress)
       .map(socket => socket.reads
+        .observe(in => in.through(utf8.decode).evalTap(s => IO.println(s"direct read: $s")).drain)
         .onFinalize(IO.delay(println(s"${LocalDateTime.now} direct read finalized")))
         .merge(input
+          .observe(in => in.through(utf8.decode).evalTap(s => IO.println(s"direct input: $s")).drain)
+          .onFinalize(socket.endOfInput)
           .onFinalize(IO.delay(println(s"${LocalDateTime.now} direct input finalized")))
           .through(socket.writes)
+          .onFinalize(socket.endOfOutput)
           .onFinalize(IO.delay(println(s"${LocalDateTime.now} direct write finalized")))
         )
       )
@@ -89,7 +96,7 @@ class Socks5FlatSpec extends AsyncFlatSpec with AsyncIOSpec:
       for
         service <- serviceR
         server <- serverR
-        client <- directR
+        client <- clientR
       yield
         client
           .onFinalize(IO.delay(println(s"${LocalDateTime.now} clientR spec finalized")))
@@ -103,7 +110,7 @@ class Socks5FlatSpec extends AsyncFlatSpec with AsyncIOSpec:
     Stream.resource(resource)
       .flatten
       .through(utf8.decode)
-      .interruptAfter(5.seconds)
+      .interruptAfter(1.seconds)
       .compile
       .toList
       .map(_.mkString)

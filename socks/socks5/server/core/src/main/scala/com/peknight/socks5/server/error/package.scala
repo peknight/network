@@ -16,10 +16,10 @@ package object error:
   private[socks5] def toResponse[E](error: E): Response =
     Response.failed(toFailed(error))
 
-  private[socks5] def toFailed(state: State): Failed =
+  private[socks5] def toFailed[F[_]](state: State[F]): Failed =
     state match
-      case e: ErrorState => toFailed(e.error)
-      case e: State.UnsupportedCommand[?] => CommandNotSupported
+      case e: ErrorState[F] => toFailed(e.error)
+      case e: State.UnsupportedCommand[?, ?] => CommandNotSupported
       case _ => GeneralSocksServerFailure
-  private[socks5] def toResponse(state: State): Response = Response.failed(toFailed(state))
+  private[socks5] def toResponse[F[_]](state: State[F]): Response = Response.failed(toFailed(state))
 end error
