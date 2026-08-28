@@ -2,7 +2,6 @@ package com.peknight.socks5.io
 
 import cats.effect.testing.scalatest.AsyncIOSpec
 import cats.effect.{IO, Resource}
-import cats.effect.std.Supervisor
 import com.comcast.ip4s.*
 import com.peknight.socks5.Command.CONNECT
 import com.peknight.socks5.client.api.ClientApi
@@ -17,15 +16,16 @@ import fs2.text.utf8
 import fs2.{Pipe, Stream}
 import org.scalatest.flatspec.AsyncFlatSpec
 
-import scala.concurrent.duration.*
-
 class Socks5FlatSpec extends AsyncFlatSpec with AsyncIOSpec:
   "Socks5 Server" should "pass" in {
 
     val servicePort: Port = port"8080"
-    val service: Stream[IO, Nothing] = Network[IO].bindAndAccept(SocketAddress.port(servicePort))
-      .map(socket => socket.reads.through(socket.writes).drain)
-      .parJoinUnbounded
+    val serviceR: Resource[IO, Stream[IO, Nothing]] =
+      Network[IO].bind(SocketAddress.port(servicePort))
+        .map(serverSocket => serverSocket.accept
+          .map(socket => socket.reads.through(socket.writes).drain)
+          .parJoinUnbounded
+        )
 
     val socks5ServerApi = ServerApi[IO, Unit, Resource[IO, (Pipe[IO, Byte, Unit], Stream[IO, Byte])], Unit, Unit](
       server.api.NegotiationApi.noAuthenticationRequired[IO],
@@ -38,13 +38,16 @@ class Socks5FlatSpec extends AsyncFlatSpec with AsyncIOSpec:
       server.api.UDPAssociateApi.unsupported[IO, Unit]
     )
     val serverPort: Port = port"1088"
-    val serve: Stream[IO, Nothing] = Socks5Server(socks5ServerApi, SocketAddress.port(serverPort)).serve
+    val serverR: Resource[IO, Stream[IO, Nothing]] =
+      Socks5Server(socks5ServerApi, SocketAddress.port(serverPort)).resource
 
     val localhost: Ipv4Address = ipv4"127.0.0.1"
     val request: Request = Request(CONNECT, localhost, servicePort)
     val text: String = "Hello, Socks5!"
     val input: Stream[IO, Byte] = Stream[IO, String](text).through(utf8.encode[IO])
-    val stream: Stream[IO, Byte] = Stream.eval(Topic[IO, Byte]).flatMap { topic =>
+
+    val clientR: Resource[IO, Stream[IO, Byte]] =
+      Resource.eval(Topic[IO, Byte]).flatMap { topic =>
       val socks5ClientApi = ClientApi[IO, Unit, Resource[IO, (Pipe[IO, Byte, Unit], Stream[IO, Byte])], Unit, Unit](
         client.api.NegotiationApi.noAuthenticationRequired[IO],
         client.api.UsernamePasswordApi.unsupported[IO, Unit],
@@ -56,18 +59,23 @@ class Socks5FlatSpec extends AsyncFlatSpec with AsyncIOSpec:
         client.api.BindApi.unsupported[IO, Unit],
         client.api.UDPAssociateApi.unsupported[IO, Unit]
       )
-      topic.subscribeUnbounded.concurrently(Socks5Client(socks5ClientApi, SocketAddress(localhost, serverPort)).run)
-    }
-    val test: IO[String] = Supervisor[IO](await = false).use { supervisor =>
-      supervisor.supervise(service.concurrently(serve).compile.drain) *>
-      IO.sleep(200.millis) *> // Wait for servers to be ready
-      stream.through(utf8.decode[IO])
-        .interruptAfter(5.seconds)
-        .compile
-        .toList
-        .map(_.mkString)
+      Socks5Client(socks5ClientApi, SocketAddress(localhost, serverPort)).resource
+        .map(stream => topic.subscribeUnbounded.concurrently(stream))
     }
 
-    test.asserting(value => assert(value === text))
+    val resource: Resource[IO, Stream[IO, Byte]] =
+      for
+        service <- serviceR
+        server <- serverR
+        client <- clientR
+      yield
+        client.mergeHaltBoth(service.merge(server))
+    Stream.resource(resource)
+      .flatten
+      .through(utf8.decode)
+      .compile
+      .toList
+      .map(_.mkString)
+      .asserting(value => assert(value === text))
   }
 end Socks5FlatSpec

@@ -15,16 +15,16 @@ import java.nio.charset.{Charset, StandardCharsets}
 trait Socks5Client[F[_], Auth, ConnectState, BindState, UDPAssociateState](using Charset)(using Async[F]):
   def api: ClientApi[F, Auth, ConnectState, BindState, UDPAssociateState]
   def connect: Resource[F, Socket[F]]
-  def run: Stream[F, Nothing] =
-    Stream.resource(connect)
-      .flatMap(socket => ClientPullState(api)
-        .run((Initial(Connection(socket.address, socket.peerAddress)), socket.reads))
-        .as(())
-        .stream
-        .through(socket.writes)
-        .attempt
-        .drain
-      )
+  def resource: Resource[F, Stream[F, Nothing]] =
+    connect.map(socket => ClientPullState(api)
+      .run((Initial(Connection(socket.address, socket.peerAddress)), socket.reads))
+      .as(())
+      .stream
+      .through(socket.writes)
+      .attempt
+      .drain
+    )
+  def run: Stream[F, Nothing] = Stream.resource(resource).flatten
 end Socks5Client
 object Socks5Client:
   private case class Socks5Client[F[_], Auth, ConnectState, BindState, UDPAssociateState](
