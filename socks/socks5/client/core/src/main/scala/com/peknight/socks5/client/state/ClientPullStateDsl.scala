@@ -152,11 +152,11 @@ trait ClientPullStateDsl[F[_]] extends PullStateDsl[F]:
       _ <- pipe(output => Stream
         .resource[F, (Pipe[F, Byte, Unit], Stream[F, Byte])](tunnel(connected))
         .flatMap((publish, input) => input
-          .observe(in => in.through(utf8.decode[F]).evalTap(s => Async[F].delay(println(s"client input: $s"))).drain)
+          .observe(in => in.through(utf8.decode[F]).evalTap(s => Async[F].delay(println(s"${LocalDateTime.now} client input: $s"))).drain)
           .onFinalize(connected.connection.endOfOutput)
           .onFinalize(Async[F].delay(println(s"${LocalDateTime.now} client connected pipe input finalized")))
           .merge(output
-            .observe(in => in.through(utf8.decode[F]).evalTap(s => Async[F].delay(println(s"client output: $s"))).drain)
+            .observe(in => in.through(utf8.decode[F]).evalTap(s => Async[F].delay(println(s"${LocalDateTime.now} client output: $s"))).drain)
             .onFinalize(connected.connection.endOfInput)
             .onFinalize(Async[F].delay(println(s"${LocalDateTime.now} client connected pipe output finalized")))
             .through(publish)
