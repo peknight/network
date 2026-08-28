@@ -163,8 +163,7 @@ object ClientPullState extends PullStateDsl:
             .onFinalize(Async[F].delay(println(s"${LocalDateTime.now} client connected pipe output finalized")))
             .through(publish)
             .onFinalize(Async[F].delay(println(s"${LocalDateTime.now} client connected pipe publish finalized")))
-            .drain
-          )
+            .drain)
           .onFinalize(Async[F].delay(println(s"${LocalDateTime.now} client connected pipe merge finalized")))
         )
         .onFinalize(Async[F].delay(println(s"${LocalDateTime.now} client connected pipe finalized")))
