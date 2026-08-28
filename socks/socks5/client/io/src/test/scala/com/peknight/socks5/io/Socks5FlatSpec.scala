@@ -2,6 +2,7 @@ package com.peknight.socks5.io
 
 import cats.effect.testing.scalatest.AsyncIOSpec
 import cats.effect.{IO, Resource}
+import cats.effect.std.Supervisor
 import com.comcast.ip4s.*
 import com.peknight.socks5.Command.CONNECT
 import com.peknight.socks5.client.api.ClientApi
@@ -57,12 +58,16 @@ class Socks5FlatSpec extends AsyncFlatSpec with AsyncIOSpec:
       )
       topic.subscribeUnbounded.concurrently(Socks5Client(socks5ClientApi, SocketAddress(localhost, serverPort)).run)
     }
-    stream.through(utf8.decode[IO])
-      .concurrently(service.concurrently(serve))
-      .interruptAfter(5.seconds)
-      .compile
-      .toList
-      .map(_.mkString)
-      .asserting(value => assert(value === text))
+    val test: IO[String] = Supervisor[IO](await = false).use { supervisor =>
+      supervisor.supervise(service.concurrently(serve).compile.drain) *>
+      IO.sleep(200.millis) *> // Wait for servers to be ready
+      stream.through(utf8.decode[IO])
+        .interruptAfter(5.seconds)
+        .compile
+        .toList
+        .map(_.mkString)
+    }
+
+    test.asserting(value => assert(value === text))
   }
 end Socks5FlatSpec

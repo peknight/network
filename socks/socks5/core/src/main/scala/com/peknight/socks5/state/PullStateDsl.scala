@@ -93,7 +93,7 @@ trait PullStateDsl extends BytePullStateErrorDsl[State, Terminated]:
 
   private[socks5] def readPort[F[_]]: Aux[F, Port] =
     parseChunk[F, Port](_.unconsN(2)) { chunk =>
-      val port = chunk.toByteVector.toInt()
+      val port = chunk.toByteVector.toInt(signed = false)
       Port.fromInt(port).toRight(IllegalPort(port))
     }(PortEof)
 
