@@ -52,19 +52,19 @@ object ClientPullState extends PullStateDsl:
   : Aux[F, State] =
     for
       initial <- typedS[F, Initial]
-      methods <- liftF(f(initial)).attempt
+      methods <- liftF[F, List[Method]](f(initial)).attempt
       negotiating = initial.negotiating(methods)
-      _ <- setS(negotiating)
-      _ <- output(encodeMethods(methods))
+      _ <- setS[F](negotiating)
+      _ <- output[F](encodeMethods(methods))
       selected <- readNegotiation[F]
       state <- selected match
-        case NoAcceptableMethod => pure(negotiating.noAcceptableMethod)
+        case NoAcceptableMethod => pure[F, State](negotiating.noAcceptableMethod)
         case NoAuthenticationRequired =>
-          liftF(noAuthenticationRequired(negotiating)).attempt
+          liftF[F, Auth](noAuthenticationRequired(negotiating)).attempt
             .map(negotiating.noAuthenticationRequired)
         case authRequiredMethod: AuthRequiredMethod =>
-          pure(negotiating.authRequiredMethod(authRequiredMethod))
-      _ <- setS(state)
+          pure[F, State](negotiating.authRequiredMethod(authRequiredMethod))
+      _ <- setS[F](state)
     yield
       state
 
@@ -78,7 +78,7 @@ object ClientPullState extends PullStateDsl:
         passwordAuth[F, Auth](f)(authenticated)
       case AuthRequiredMethodSelected(IANAAssigned(_), _, _) => ianaAssigned.flatMap(_ => getS[F])
       case AuthRequiredMethodSelected(PrivateMethod(_), _, _) => privateMethod.flatMap(_ => getS[F])
-      case state => pure(state)
+      case state => pure[F, State](state)
     }
 
   private def passwordAuth[F[_], Auth](f: AuthRequiredMethodSelected => F[UserPassword])
@@ -88,16 +88,16 @@ object ClientPullState extends PullStateDsl:
       _ <- typed[F, UsernamePassword.type](authRequiredMethodSelected.selected)
       userPassword <- liftF(f(authRequiredMethodSelected)).attempt
       usernamePasswordAuthenticating = authRequiredMethodSelected.passwordUnsafe(userPassword)
-      _ <- setS(usernamePasswordAuthenticating)
-      bytes <- liftET(encodeUserPassword(userPassword))
-      _ <- output(bytes)
+      _ <- setS[F](usernamePasswordAuthenticating)
+      bytes <- liftET[F, ByteVector](encodeUserPassword(userPassword))
+      _ <- output[F](bytes)
       status <- readStatus[F]
       state <- status match
         case Success =>
-          liftF(authenticated(usernamePasswordAuthenticating)).attempt
+          liftF[F, Auth](authenticated(usernamePasswordAuthenticating)).attempt
             .map(usernamePasswordAuthenticating.authenticated)
-        case failure@Failure(_) => pure(usernamePasswordAuthenticating.failed(failure))
-      _ <- setS(state)
+        case failure@Failure(_) => pure[F, State](usernamePasswordAuthenticating.failed(failure))
+      _ <- setS[F](state)
     yield
       state
 
@@ -109,11 +109,11 @@ object ClientPullState extends PullStateDsl:
                      (using Charset): Aux[F, State] =
     for
       authenticated <- typedS[F, Authenticated[Auth]]
-      request <- liftF(f(authenticated)).attempt
+      request <- liftF[F, Request](f(authenticated)).attempt
       requested = authenticated.requested(request)
-      _ <- setS(requested)
-      bytes <- liftET(encodeRequest(request))
-      _ <- output(bytes)
+      _ <- setS[F](requested)
+      bytes <- liftET[F, ByteVector](encodeRequest(request))
+      _ <- output[F](bytes)
       (response, addressBytes) <- readResponse[F]
       state <- request.command match
         case CONNECT => handleRequest[F, Auth, ConnectState, Connected[Auth, ConnectState], ConnectFailed[Auth, ConnectState]](response)(connectF)(_.connected(_, _, addressBytes))(_.connectFailed(_, _, addressBytes))
@@ -134,16 +134,16 @@ object ClientPullState extends PullStateDsl:
       state =
         if response.reply.success then success(requested, response, s)
         else failed(requested, response, s)
-      _ <- setS(state)
+      _ <- setS[F](state)
     yield
       state
 
-  private def established[F[_] : Concurrent, Auth, ConnectState, BindState, UDPAssociateState]
+  private def established[F[_]: Concurrent, Auth, ConnectState, BindState, UDPAssociateState]
                          (tunnel: Connected[Auth, ConnectState] => Resource[F, (Pipe[F, Byte, Unit], Stream[F, Byte])])
                          (bound: Aux[F, Unit], udpAssociated: Aux[F, Unit])
   : Aux[F, Unit] =
     getS[F].flatMap {
-      case _: Connected[?, ?] => connected(tunnel)
+      case _: Connected[?, ?] => connected[F, Auth, ConnectState](tunnel)
       case _: Bound[?, ?] => bound
       case _: UDPAssociated[?, ?] => udpAssociated
       case state => liftT[F, Unit](WrongClassTag[RespondedSuccessState[?, ?]](state))
@@ -158,7 +158,7 @@ object ClientPullState extends PullStateDsl:
         .resource[F, (Pipe[F, Byte, Unit], Stream[F, Byte])](tunnel(connected))
         .flatMap((publish, input) => input.merge(output.through(publish).drain))
       ).attempt
-      _ <- setS(connected.closed)
+      _ <- setS[F](connected.closed)
     yield
       ()
 
