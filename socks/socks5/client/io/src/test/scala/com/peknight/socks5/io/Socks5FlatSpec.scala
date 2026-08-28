@@ -22,7 +22,9 @@ import scala.concurrent.duration.*
 class Socks5FlatSpec extends AsyncFlatSpec with AsyncIOSpec:
   "Socks5 Server" should "pass" in {
 
+    val localHost: Ipv4Address = ipv4"127.0.0.1"
     val servicePort: Port = port"8080"
+    val serviceAddress: GenSocketAddress = SocketAddress(localHost, servicePort)
     val serviceR: Resource[IO, Stream[IO, Nothing]] =
       Network[IO].bind(SocketAddress.port(servicePort))
         .map(serverSocket => serverSocket.accept
@@ -33,6 +35,19 @@ class Socks5FlatSpec extends AsyncFlatSpec with AsyncIOSpec:
             .drain)
           .parJoinUnbounded
         )
+
+    val text: String = "Hello, Socks5!"
+    val input: Stream[IO, Byte] = Stream[IO, String](text).through(utf8.encode[IO])
+
+    val directR: Resource[IO, Stream[IO, Byte]] = Network[IO].connect(serviceAddress)
+      .map(socket => socket.reads
+        .onFinalize(IO.delay(println(s"${LocalDateTime.now} direct read finalized")))
+        .merge(input
+          .onFinalize(IO.delay(println(s"${LocalDateTime.now} direct input finalized")))
+          .through(socket.writes)
+          .onFinalize(IO.delay(println(s"${LocalDateTime.now} direct write finalized")))
+        )
+      )
 
     val socks5ServerApi = ServerApi[IO, Unit, Resource[IO, (Pipe[IO, Byte, Unit], Stream[IO, Byte])], Unit, Unit](
       server.api.NegotiationApi.noAuthenticationRequired[IO],
@@ -45,13 +60,9 @@ class Socks5FlatSpec extends AsyncFlatSpec with AsyncIOSpec:
       server.api.UDPAssociateApi.unsupported[IO, Unit]
     )
     val serverPort: Port = port"1088"
+    val serverAddress: GenSocketAddress = SocketAddress(localHost, serverPort)
     val serverR: Resource[IO, Stream[IO, Nothing]] =
       Socks5Server(socks5ServerApi, SocketAddress.port(serverPort)).resource
-
-    val localhost: Ipv4Address = ipv4"127.0.0.1"
-    val request: Request = Request(CONNECT, localhost, servicePort)
-    val text: String = "Hello, Socks5!"
-    val input: Stream[IO, Byte] = Stream[IO, String](text).through(utf8.encode[IO])
 
     val clientR: Resource[IO, Stream[IO, Byte]] =
       Resource.eval(Topic[IO, Byte]).flatMap { topic =>
@@ -61,12 +72,12 @@ class Socks5FlatSpec extends AsyncFlatSpec with AsyncIOSpec:
         client.api.GSSApiApi.unsupported[IO, Unit],
         client.api.IANAAssignedApi.unsupported[IO, Unit],
         client.api.PrivateMethodApi.unsupported[IO, Unit],
-        client.api.RequestApi[IO, Unit](request),
+        client.api.RequestApi[IO, Unit](Request(CONNECT, localHost, servicePort)),
         client.api.ConnectApi[IO, Unit](input, topic.publish),
         client.api.BindApi.unsupported[IO, Unit],
         client.api.UDPAssociateApi.unsupported[IO, Unit]
       )
-      Socks5Client(socks5ClientApi, SocketAddress(localhost, serverPort)).resource
+      Socks5Client(socks5ClientApi, serverAddress).resource
         .map(stream => topic.subscribeUnbounded
           .onFinalize(IO.delay(println(s"${LocalDateTime.now} client spec subscribe finalized")))
           .merge(stream.onFinalize(IO.delay(println(s"${LocalDateTime.now} client spec stream finalized"))))
@@ -78,7 +89,7 @@ class Socks5FlatSpec extends AsyncFlatSpec with AsyncIOSpec:
       for
         service <- serviceR
         server <- serverR
-        client <- clientR
+        client <- directR
       yield
         client
           .onFinalize(IO.delay(println(s"${LocalDateTime.now} clientR spec finalized")))
