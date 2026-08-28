@@ -26,7 +26,11 @@ class Socks5FlatSpec extends AsyncFlatSpec with AsyncIOSpec:
     val serviceR: Resource[IO, Stream[IO, Nothing]] =
       Network[IO].bind(SocketAddress.port(servicePort))
         .map(serverSocket => serverSocket.accept
-          .map(socket => socket.reads.through(socket.writes).drain)
+          .map(socket => socket.reads
+            .onFinalize(IO.delay(println(s"${LocalDateTime.now} service read finalized")))
+            .through(socket.writes)
+            .onFinalize(IO.delay(println(s"${LocalDateTime.now} service writes finalized")))
+            .drain)
           .parJoinUnbounded
         )
 
