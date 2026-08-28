@@ -1,7 +1,7 @@
 package com.peknight.socks5.client.state
 
 import cats.ApplicativeError
-import cats.effect.{Concurrent, Resource}
+import cats.effect.{Async, Resource}
 import cats.syntax.applicativeError.*
 import com.comcast.ip4s.{Ipv4Address, Ipv6Address}
 import com.peknight.auth.UserPassword
@@ -24,12 +24,13 @@ import fs2.{Pipe, Stream}
 import scodec.bits.ByteVector
 
 import java.nio.charset.Charset
+import java.time.LocalDateTime
 
 object ClientPullState extends PullStateDsl:
 
   def apply[F[_], Auth, ConnectState, BindState, UDPAssociateState]
            (api: ClientApi[F, Auth, ConnectState, BindState, UDPAssociateState])
-           (using Charset)(using Concurrent[F]): Aux[F, State] =
+           (using Charset)(using Async[F]): Aux[F, State] =
     val pullState: Aux[F, State] =
       for
         _ <- negotiation[F, Auth](api.negotiationApi.negotiation)(api.negotiationApi.noAuthenticationRequired)
@@ -138,7 +139,7 @@ object ClientPullState extends PullStateDsl:
     yield
       state
 
-  private def established[F[_]: Concurrent, Auth, ConnectState, BindState, UDPAssociateState]
+  private def established[F[_]: Async, Auth, ConnectState, BindState, UDPAssociateState]
                          (tunnel: Connected[Auth, ConnectState] => Resource[F, (Pipe[F, Byte, Unit], Stream[F, Byte])])
                          (bound: Aux[F, Unit], udpAssociated: Aux[F, Unit])
   : Aux[F, Unit] =
@@ -149,14 +150,24 @@ object ClientPullState extends PullStateDsl:
       case state => liftT[F, Unit](WrongClassTag[RespondedSuccessState[?, ?]](state))
     }
 
-  private def connected[F[_]: Concurrent, Auth, ConnectState](
+  private def connected[F[_]: Async, Auth, ConnectState](
     tunnel: Connected[Auth, ConnectState] => Resource[F, (Pipe[F, Byte, Unit], Stream[F, Byte])]
   ): Aux[F, Unit] =
     for
       connected <- typedS[F, Connected[Auth, ConnectState]]
       _ <- pipe[F](output => Stream
         .resource[F, (Pipe[F, Byte, Unit], Stream[F, Byte])](tunnel(connected))
-        .flatMap((publish, input) => input.merge(output.through(publish).drain))
+        .flatMap((publish, input) => input
+          .onFinalize(Async[F].delay(println(s"${LocalDateTime.now} client connected pipe input finalized")))
+          .merge(output
+            .onFinalize(Async[F].delay(println(s"${LocalDateTime.now} client connected pipe output finalized")))
+            .through(publish)
+            .onFinalize(Async[F].delay(println(s"${LocalDateTime.now} client connected pipe publish finalized")))
+            .drain
+          )
+          .onFinalize(Async[F].delay(println(s"${LocalDateTime.now} client connected pipe merge finalized")))
+        )
+        .onFinalize(Async[F].delay(println(s"${LocalDateTime.now} client connected pipe finalized")))
       ).attempt
       _ <- setS[F](connected.closed)
     yield

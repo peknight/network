@@ -16,6 +16,7 @@ import fs2.text.utf8
 import fs2.{Pipe, Stream}
 import org.scalatest.flatspec.AsyncFlatSpec
 
+import java.time.LocalDateTime
 import scala.concurrent.duration.*
 
 class Socks5FlatSpec extends AsyncFlatSpec with AsyncIOSpec:
@@ -62,7 +63,11 @@ class Socks5FlatSpec extends AsyncFlatSpec with AsyncIOSpec:
         client.api.UDPAssociateApi.unsupported[IO, Unit]
       )
       Socks5Client(socks5ClientApi, SocketAddress(localhost, serverPort)).resource
-        .map(stream => topic.subscribeUnbounded.merge(stream))
+        .map(stream => topic.subscribeUnbounded
+          .onFinalize(IO.delay(println(s"${LocalDateTime.now} client spec subscribe finalized")))
+          .merge(stream.onFinalize(IO.delay(println(s"${LocalDateTime.now} client spec stream finalized"))))
+          .onFinalize(IO.delay(println(s"${LocalDateTime.now} client spec merge finalized")))
+        )
     }
 
     val resource: Resource[IO, Stream[IO, Byte]] =
@@ -71,7 +76,15 @@ class Socks5FlatSpec extends AsyncFlatSpec with AsyncIOSpec:
         server <- serverR
         client <- clientR
       yield
-        client.mergeHaltBoth(service.merge(server))
+        client
+          .onFinalize(IO.delay(println(s"${LocalDateTime.now} clientR spec finalized")))
+          .mergeHaltBoth(service
+            .onFinalize(IO.delay(println(s"${LocalDateTime.now} serviceR spec finalized")))
+            .merge(server
+              .onFinalize(IO.delay(println(s"${LocalDateTime.now} serverR spec finalized"))))
+            .onFinalize(IO.delay(println(s"${LocalDateTime.now} serviceR merge serverR spec finalized")))
+          )
+          .onFinalize(IO.delay(println(s"${LocalDateTime.now} clientR serviceR serverR spec finalized")))
     Stream.resource(resource)
       .flatten
       .through(utf8.decode)
