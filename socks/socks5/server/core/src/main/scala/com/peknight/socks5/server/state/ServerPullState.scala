@@ -148,9 +148,9 @@ object ServerPullState extends PullStateDsl:
   ): Aux[F, Unit] =
     for
       connected <- typedS[F, Connected[Auth, ConnectState]]
-      _ <- pipe[F](in => Stream
+      _ <- pipe[F](input => Stream
         .resource[F, (Pipe[F, Byte, Unit], Stream[F, Byte])](tunnel(connected))
-        .flatMap((send, receive) => receive.merge(in.through(send).drain))
+        .flatMap((send, receive) => receive.merge(input.through(send).drain))
       ).attempt
       _ <- setS[F](connected.closed)
     yield
