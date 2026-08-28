@@ -45,8 +45,8 @@ lazy val socks = (project in file("socks"))
 lazy val socksCore = (projectMatrix in file("socks/core"))
   .settings(name := "socks-core")
   .settings(libraryDependencies ++= dependencies(
+    fs2.io,
     peknight.error,
-    comcast.ip4s,
   ))
   .jvmPlatform(scalaVersions = Seq(scala.scala3.version))
   .jsPlatform(scalaVersions = Seq(scala.scala3.version))
@@ -91,7 +91,6 @@ lazy val socks5Core = (projectMatrix in file("socks/socks5/core"))
 lazy val socks5Server = (project in file("socks/socks5/server"))
   .settings(name := "socks5-server")
   .aggregate(socks5ServerCore.projectRefs *)
-  .aggregate(socks5ServerIO.projectRefs *)
 
 lazy val socks5ServerCore = (projectMatrix in file("socks/socks5/server/core"))
   .dependsOn(socks5Core, socksServerCore)
@@ -99,34 +98,19 @@ lazy val socks5ServerCore = (projectMatrix in file("socks/socks5/server/core"))
   .jvmPlatform(scalaVersions = Seq(scala.scala3.version))
   .jsPlatform(scalaVersions = Seq(scala.scala3.version))
 
-lazy val socks5ServerIO = (projectMatrix in file("socks/socks5/server/io"))
-  .dependsOn(socks5ServerCore)
-  .settings(name := "socks5-server-io")
-  .settings(libraryDependencies ++= dependencies(
-    fs2.io,
-  ))
-  .jvmPlatform(scalaVersions = Seq(scala.scala3.version))
-  .jsPlatform(scalaVersions = Seq(scala.scala3.version))
-
 lazy val socks5Client = (project in file("socks/socks5/client"))
   .settings(name := "socks5-client")
   .aggregate(socks5ClientCore.projectRefs *)
-  .aggregate(socks5ClientIO.projectRefs *)
 
 lazy val socks5ClientCore = (projectMatrix in file("socks/socks5/client/core"))
-  .dependsOn(socks5Core, socksClientCore)
-  .settings(name := "socks5-client-core")
-  .jvmPlatform(scalaVersions = Seq(scala.scala3.version))
-  .jsPlatform(scalaVersions = Seq(scala.scala3.version))
-
-lazy val socks5ClientIO = (projectMatrix in file("socks/socks5/client/io"))
   .dependsOn(
-    socks5ClientCore,
-    socks5ServerIO % Test,
+    socks5Core,
+    socksClientCore,
+    socks5ServerCore % Test,
   )
-  .settings(name := "socks5-client-io")
+  .settings(name := "socks5-client-core")
   .settings(libraryDependencies ++= dependencies(
-    fs2.io,
+    peknight.ip4s,
   ))
   .settings(libraryDependencies ++= testDependencies(
     scalaTest.flatSpec,
@@ -134,4 +118,3 @@ lazy val socks5ClientIO = (projectMatrix in file("socks/socks5/client/io"))
   ))
   .jvmPlatform(scalaVersions = Seq(scala.scala3.version))
   .jsPlatform(scalaVersions = Seq(scala.scala3.version))
-

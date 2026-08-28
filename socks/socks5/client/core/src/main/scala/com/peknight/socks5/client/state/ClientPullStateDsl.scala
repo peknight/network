@@ -6,6 +6,7 @@ import com.peknight.auth.UserPassword
 import com.peknight.cats.instances.eitherT.given
 import com.peknight.error.Error
 import com.peknight.error.std.WrongClassTag
+import com.peknight.socks.Socket
 import com.peknight.socks.SocksVersion.socks5
 import com.peknight.socks5.*
 import com.peknight.socks5.Command.{BIND, CONNECT, UDP_ASSOCIATE}
@@ -18,8 +19,8 @@ import com.peknight.socks5.client.api.ClientApi
 import com.peknight.socks5.client.error.{MethodEof, ReplyEof, StatusEof}
 import com.peknight.socks5.state.State.{NoAcceptableMethod as _, *}
 import com.peknight.socks5.state.{PullStateDsl, State}
+import fs2.Stream
 import fs2.text.utf8
-import fs2.{Pipe, Stream}
 import scodec.bits.ByteVector
 
 import java.nio.charset.Charset
@@ -136,7 +137,7 @@ trait ClientPullStateDsl[F[_]] extends PullStateDsl[F]:
       state
 
   private def established[Auth, ConnectState, BindState, UDPAssociateState]
-                         (tunnel: Connected[F, Auth, ConnectState] => Resource[F, (Pipe[F, Byte, Unit], Stream[F, Byte])])
+                         (tunnel: Connected[F, Auth, ConnectState] => Resource[F, Socket[F]])
                          (bound: Aux[Unit], udpAssociated: Aux[Unit])(using Async[F]): Aux[Unit] =
     getS.flatMap {
       case _: Connected[?, ?, ?] => connected[Auth, ConnectState](tunnel)
@@ -145,21 +146,23 @@ trait ClientPullStateDsl[F[_]] extends PullStateDsl[F]:
       case state => liftT[Unit](WrongClassTag[RespondedSuccessState[?, ?, ?]](state))
     }
 
-  private def connected[Auth, ConnectState](tunnel: Connected[F, Auth, ConnectState] => Resource[F, (Pipe[F, Byte, Unit], Stream[F, Byte])])
+  private def connected[Auth, ConnectState](tunnel: Connected[F, Auth, ConnectState] => Resource[F, Socket[F]])
                                            (using Async[F]): Aux[Unit] =
     for
       connected <- typedS[Connected[F, Auth, ConnectState]]
       _ <- pipe(output => Stream
-        .resource[F, (Pipe[F, Byte, Unit], Stream[F, Byte])](tunnel(connected))
-        .flatMap((publish, input) => input
-          .observe(in => in.through(utf8.decode[F]).evalTap(s => Async[F].delay(println(s"${LocalDateTime.now} client input: $s"))).drain)
+        .resource[F, Socket[F]](tunnel(connected))
+        .flatMap(socket => socket.reads
+          .onFinalize(socket.endOfInput)
           .onFinalize(connected.connection.endOfOutput)
+          .observe(in => in.through(utf8.decode[F]).evalTap(s => Async[F].delay(println(s"${LocalDateTime.now} client input: $s"))).drain)
           .onFinalize(Async[F].delay(println(s"${LocalDateTime.now} client connected pipe input finalized")))
           .merge(output
-            .observe(in => in.through(utf8.decode[F]).evalTap(s => Async[F].delay(println(s"${LocalDateTime.now} client output: $s"))).drain)
             .onFinalize(connected.connection.endOfInput)
+            .observe(in => in.through(utf8.decode[F]).evalTap(s => Async[F].delay(println(s"${LocalDateTime.now} client output: $s"))).drain)
             .onFinalize(Async[F].delay(println(s"${LocalDateTime.now} client connected pipe output finalized")))
-            .through(publish)
+            .through(socket.writes)
+            .onFinalize(socket.endOfOutput)
             .onFinalize(Async[F].delay(println(s"${LocalDateTime.now} client connected pipe publish finalized")))
             .drain)
           .onFinalize(Async[F].delay(println(s"${LocalDateTime.now} client connected pipe merge finalized")))

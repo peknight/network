@@ -1,4 +1,4 @@
-package com.peknight.socks5.server.io
+package com.peknight.socks5.server
 
 import cats.effect.{Async, Resource}
 import com.comcast.ip4s.{GenSocketAddress, SocketAddress}
@@ -37,7 +37,7 @@ object Socks5Server:
     options: List[SocketOption] = Nil,
     charset: Charset = StandardCharsets.UTF_8
   )(using Async[F], Network[F])
-    extends com.peknight.socks5.server.io.Socks5Server[F, Auth, ConnectState, BindState, UDPAssociateState](using charset):
+    extends com.peknight.socks5.server.Socks5Server[F, Auth, ConnectState, BindState, UDPAssociateState](using charset):
     def bind: Resource[F, ServerSocket[F]] = Network[F].bind(address, options)
   end Socks5Server
   def apply[F[_], Auth, ConnectState, BindState, UDPAssociateState](
@@ -45,6 +45,6 @@ object Socks5Server:
     address: GenSocketAddress = SocketAddress.Wildcard,
     options: List[SocketOption] = Nil, charset: Charset = StandardCharsets.UTF_8
   )(using Async[F], Network[F])
-  : com.peknight.socks5.server.io.Socks5Server[F, Auth, ConnectState, BindState, UDPAssociateState] =
+  : com.peknight.socks5.server.Socks5Server[F, Auth, ConnectState, BindState, UDPAssociateState] =
     Socks5Server(api, address, options)
 end Socks5Server
