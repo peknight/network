@@ -1,12 +1,10 @@
 package com.peknight.socks5.client.state
 
-import cats.effect.{Concurrent, Resource}
+import cats.effect.Concurrent
 import com.comcast.ip4s.{Ipv4Address, Ipv6Address}
 import com.peknight.auth.UserPassword
 import com.peknight.cats.instances.eitherT.given
 import com.peknight.error.Error
-import com.peknight.error.std.WrongClassTag
-import com.peknight.socks.Socket
 import com.peknight.socks.SocksVersion.socks5
 import com.peknight.socks5.*
 import com.peknight.socks5.Command.{BIND, CONNECT, UDP_ASSOCIATE}
@@ -19,7 +17,6 @@ import com.peknight.socks5.client.api.ClientApi
 import com.peknight.socks5.client.error.{MethodEof, ReplyEof, StatusEof}
 import com.peknight.socks5.state.State.{NoAcceptableMethod as _, *}
 import com.peknight.socks5.state.{PullStateDsl, State}
-import fs2.Stream
 import scodec.bits.ByteVector
 
 import java.nio.charset.Charset
@@ -133,36 +130,6 @@ trait ClientPullStateDsl[F[_]] extends PullStateDsl[F]:
       _ <- setS(state)
     yield
       state
-
-  private def established[Auth, ConnectState, BindState, UDPAssociateState]
-                         (tunnel: Connected[F, Auth, ConnectState] => Resource[F, Socket[F]])
-                         (bound: Aux[Unit], udpAssociated: Aux[Unit])(using Concurrent[F]): Aux[Unit] =
-    getS.flatMap {
-      case _: Connected[?, ?, ?] => connected[Auth, ConnectState](tunnel)
-      case _: Bound[?, ?, ?] => bound
-      case _: UDPAssociated[?, ?, ?] => udpAssociated
-      case state => liftT[Unit](WrongClassTag[RespondedSuccessState[?, ?, ?]](state))
-    }
-
-  private def connected[Auth, ConnectState](tunnel: Connected[F, Auth, ConnectState] => Resource[F, Socket[F]])
-                                           (using Concurrent[F]): Aux[Unit] =
-    for
-      connected <- typedS[Connected[F, Auth, ConnectState]]
-      _ <- pipe(output => Stream
-        .resource[F, Socket[F]](tunnel(connected))
-        .flatMap(socket => socket.reads
-          .onFinalize(socket.endOfInput)
-          .onFinalize(connected.connection.endOfOutput)
-          .merge(output
-            .onFinalize(connected.connection.endOfInput)
-            .through(socket.writes)
-            .onFinalize(socket.endOfOutput)
-            .drain)
-        )
-      ).attempt
-      _ <- setS(connected.closed)
-    yield
-      ()
 
   private def readNegotiation: Aux[Method] =
     for

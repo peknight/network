@@ -1,5 +1,6 @@
 package com.peknight.socks5.state
 
+import cats.effect.{Concurrent, Resource}
 import cats.syntax.either.*
 import com.comcast.ip4s.*
 import com.peknight.cats.instances.eitherT.given
@@ -7,13 +8,14 @@ import com.peknight.error.Error
 import com.peknight.error.std.WrongClassTag
 import com.peknight.error.syntax.either.value
 import com.peknight.fs2.pull.state.BytePullStateErrorDsl
-import com.peknight.socks.SocksVersion
 import com.peknight.socks.SocksVersion.socks5
 import com.peknight.socks.error.UnsupportedSocksVersion
+import com.peknight.socks.{Socket, SocksVersion}
 import com.peknight.socks5.auth.password.PasswordVersion.version1
 import com.peknight.socks5.error.*
-import com.peknight.socks5.state.State.Terminated
+import com.peknight.socks5.state.State.*
 import com.peknight.socks5.{AddressType, Reserved}
+import fs2.Stream
 import scodec.bits.ByteVector
 
 import java.nio.charset.Charset
@@ -24,6 +26,33 @@ import scala.reflect.ClassTag
  * 固定 `S = State`、`E = Terminated`，底层 `Throwable` 统一通过 `State.error` 提升。
  */
 trait PullStateDsl[F[_]] extends BytePullStateErrorDsl[F, State[F], Terminated[F]]:
+
+  private[socks5] def established[Auth, ConnectState, BindState, UDPAssociateState]
+                                 (tunnel: Connected[F, Auth, ConnectState] => Resource[F, Socket[F]])
+                                 (bound: Aux[Unit], udpAssociated: Aux[Unit])(using Concurrent[F]): Aux[Unit] =
+    getS.flatMap {
+      case _: Connected[?, ?, ?] => connected[Auth, ConnectState](tunnel)
+      case _: Bound[?, ?, ?] => bound
+      case _: UDPAssociated[?, ?, ?] => udpAssociated
+      case state => liftT[Unit](WrongClassTag[RespondedSuccessState[?, ?, ?]](state))
+    }
+
+  private def connected[Auth, ConnectState](tunnel: Connected[F, Auth, ConnectState] => Resource[F, Socket[F]])
+                                           (using Concurrent[F]): Aux[Unit] =
+    for
+      connected <- typedS[Connected[F, Auth, ConnectState]]
+      _ <- pipe(input => Stream
+        .resource[F, Socket[F]](tunnel(connected))
+        .flatMap(socket => socket.reads
+          .onFinalize(socket.endOfInput)
+          .onFinalize(connected.connection.endOfOutput)
+          .merge(input.onFinalize(connected.connection.endOfInput)
+            .through(socket.writes).onFinalize(socket.endOfOutput)
+            .drain)))
+        .attempt
+      _ <- setS(connected.closed)
+    yield
+      ()
 
   private[socks5] def readSocks5Version: Aux[SocksVersion] =
     parse1[SocksVersion](version =>
