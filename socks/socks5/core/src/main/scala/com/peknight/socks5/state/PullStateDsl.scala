@@ -44,7 +44,6 @@ trait PullStateDsl[F[_]] extends BytePullStateErrorDsl[F, State[F], Terminated[F
       _ <- pipe(input => Stream
         .resource[F, Socket[F]](tunnel(connected))
         .flatMap(socket => socket.reads
-          .onFinalize(socket.endOfInput)
           .onFinalize(connected.connection.endOfOutput)
           .merge(input.onFinalize(connected.connection.endOfInput)
             .through(socket.writes).onFinalize(socket.endOfOutput)
