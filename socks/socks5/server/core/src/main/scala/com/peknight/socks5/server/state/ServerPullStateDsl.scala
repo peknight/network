@@ -1,6 +1,6 @@
 package com.peknight.socks5.server.state
 
-import cats.effect.{Async, Resource}
+import cats.effect.{Concurrent, Resource}
 import com.peknight.auth.{Password, User, UserPassword as UPassword}
 import com.peknight.cats.instances.eitherT.given
 import com.peknight.error.std.WrongClassTag
@@ -19,11 +19,9 @@ import com.peknight.socks5.server.error.*
 import com.peknight.socks5.state.State.{NoAcceptableMethod as _, UnsupportedCommand as _, *}
 import com.peknight.socks5.state.{PullStateDsl, State}
 import fs2.Stream
-import fs2.text.utf8
 import scodec.bits.ByteVector
 
 import java.nio.charset.Charset
-import java.time.LocalDateTime
 
 /**
  * SOCKS5 服务端状态机专用的 [[BytePullStateErrorDsl]]：
@@ -33,7 +31,7 @@ trait ServerPullStateDsl[F[_]] extends PullStateDsl[F]:
 
   def state[Auth, ConnectState, BindState, UDPAssociateState]
            (api: ServerApi[F, Auth, ConnectState, BindState, UDPAssociateState])
-           (using Charset)(using Async[F]): Aux[State[F]] =
+           (using Charset)(using Concurrent[F]): Aux[State[F]] =
     val pullState: Aux[State[F]] =
       for
         _ <- negotiation[Auth](api.negotiationApi.negotiation)
@@ -132,7 +130,7 @@ trait ServerPullStateDsl[F[_]] extends PullStateDsl[F]:
 
   private def established[Auth, ConnectState, BindState, UDPAssociateState]
                          (tunnel: Connected[F, Auth, ConnectState] => Resource[F, Socket[F]])
-                         (bound: Aux[Unit], udpAssociated: Aux[Unit])(using Async[F]): Aux[Unit] =
+                         (bound: Aux[Unit], udpAssociated: Aux[Unit])(using Concurrent[F]): Aux[Unit] =
     getS.flatMap {
       case _: Connected[?, ?, ?] => connected[Auth, ConnectState](tunnel)
       case _: Bound[?, ?, ?] => bound
@@ -141,7 +139,7 @@ trait ServerPullStateDsl[F[_]] extends PullStateDsl[F]:
     }
 
   private def connected[Auth, ConnectState](tunnel: Connected[F, Auth, ConnectState] => Resource[F, Socket[F]])
-                                           (using Async[F]): Aux[Unit] =
+                                           (using Concurrent[F]): Aux[Unit] =
     for
       connected <- typedS[Connected[F, Auth, ConnectState]]
       _ <- pipe(input => Stream
@@ -149,19 +147,12 @@ trait ServerPullStateDsl[F[_]] extends PullStateDsl[F]:
         .flatMap(socket => socket.reads
           .onFinalize(socket.endOfInput)
           .onFinalize(connected.connection.endOfOutput)
-          .observe(in => in.through(utf8.decode[F]).evalTap(s => Async[F].delay(println(s"${LocalDateTime.now} server receive: $s"))).drain)
-          .onFinalize(Async[F].delay(println(s"${LocalDateTime.now} server connected pipe receive finalized")))
           .merge(input
             .onFinalize(connected.connection.endOfInput)
-            .observe(in => in.through(utf8.decode[F]).evalTap(s => Async[F].delay(println(s"${LocalDateTime.now} server input: $s"))).drain)
-            .onFinalize(Async[F].delay(println(s"${LocalDateTime.now} server connected pipe input finalized")))
             .through(socket.writes)
             .onFinalize(socket.endOfOutput)
-            .onFinalize(Async[F].delay(println(s"${LocalDateTime.now} server connected pipe send finalized")))
             .drain)
-          .onFinalize(Async[F].delay(println(s"${LocalDateTime.now} server connected pipe merge finalized")))
         )
-        .onFinalize(Async[F].delay(println(s"${LocalDateTime.now} server connected pipe finalized")))
       ).attempt
       _ <- setS(connected.closed)
     yield

@@ -11,7 +11,6 @@ import fs2.io.net.{Network, ServerSocket, SocketOption}
 import fs2.{Pull, Stream}
 
 import java.nio.charset.{Charset, StandardCharsets}
-import java.time.LocalDateTime
 
 trait Socks5Server[F[_], Auth, ConnectState, BindState, UDPAssociateState](using Charset)(using Async[F]):
   def api: ServerApi[F, Auth, ConnectState, BindState, UDPAssociateState]
@@ -22,9 +21,7 @@ trait Socks5Server[F[_], Auth, ConnectState, BindState, UDPAssociateState](using
         socket.reads))
       .as(())
       .stream
-      .onFinalize(Async[F].delay(println(s"${LocalDateTime.now} server resource stream finalized")))
       .through(socket.writes)
-      .onFinalize(Async[F].delay(println(s"${LocalDateTime.now} server resource writes finalized")))
       .attempt
       .drain
     ).parJoinUnbounded)
