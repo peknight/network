@@ -73,24 +73,25 @@ class Socks5FlatSpec extends AsyncFlatSpec with AsyncIOSpec:
 
     val clientR: Resource[IO, Stream[IO, Byte]] =
       Resource.eval(Topic[IO, Byte]).flatMap { topic =>
-      val socks5ClientApi = ClientApi[IO, Unit, Resource[IO, (Pipe[IO, Byte, Unit], Stream[IO, Byte])], Unit, Unit](
-        client.api.NegotiationApi.noAuthenticationRequired[IO],
-        client.api.UsernamePasswordApi.unsupported[IO, Unit],
-        client.api.GSSApiApi.unsupported[IO, Unit],
-        client.api.IANAAssignedApi.unsupported[IO, Unit],
-        client.api.PrivateMethodApi.unsupported[IO, Unit],
-        client.api.RequestApi[IO, Unit](Request(CONNECT, localHost, servicePort)),
-        client.api.ConnectApi[IO, Unit](input, topic.publish),
-        client.api.BindApi.unsupported[IO, Unit],
-        client.api.UDPAssociateApi.unsupported[IO, Unit]
-      )
-      Socks5Client(socks5ClientApi, serverAddress).resource
-        .map(stream => topic.subscribeUnbounded
-          .onFinalize(IO.delay(println(s"${LocalDateTime.now} client spec subscribe finalized")))
-          .merge(stream.onFinalize(IO.delay(println(s"${LocalDateTime.now} client spec stream finalized"))))
-          .onFinalize(IO.delay(println(s"${LocalDateTime.now} client spec merge finalized")))
+        val socks5ClientApi = ClientApi[IO, Unit, Resource[IO, (Pipe[IO, Byte, Unit], Stream[IO, Byte])], Unit, Unit](
+          client.api.NegotiationApi.noAuthenticationRequired[IO],
+          client.api.UsernamePasswordApi.unsupported[IO, Unit],
+          client.api.GSSApiApi.unsupported[IO, Unit],
+          client.api.IANAAssignedApi.unsupported[IO, Unit],
+          client.api.PrivateMethodApi.unsupported[IO, Unit],
+          client.api.RequestApi[IO, Unit](Request(CONNECT, localHost, servicePort)),
+          client.api.ConnectApi[IO, Unit](input, in => in.through(topic.publish).onFinalize(IO.delay(println(s"${LocalDateTime.now} topic publish finalized")))),
+          client.api.BindApi.unsupported[IO, Unit],
+          client.api.UDPAssociateApi.unsupported[IO, Unit]
         )
-    }
+        Socks5Client(socks5ClientApi, serverAddress).resource
+          .map(stream => topic.subscribeUnbounded
+            .observe(in => in.through(utf8.decode).evalTap(s => IO.println(s"${LocalDateTime.now} subscribe read: $s")).drain)
+            .onFinalize(IO.delay(println(s"${LocalDateTime.now} client spec subscribe finalized")))
+            .merge(stream.onFinalize(IO.delay(println(s"${LocalDateTime.now} client spec stream finalized"))))
+            .onFinalize(IO.delay(println(s"${LocalDateTime.now} client spec merge finalized")))
+          )
+      }
 
     val resource: Resource[IO, Stream[IO, Byte]] =
       for
