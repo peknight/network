@@ -47,9 +47,7 @@ trait PullStateDsl[F[_]] extends BytePullStateErrorDsl[F, State[F], Terminated[F
           .through(connected.connection.writes)
           .onFinalize(connected.connection.endOfOutput)
           .drain
-          .merge(input.onFinalize(connected.connection.endOfInput)
-            .through(socket.writes).onFinalize(socket.endOfOutput)
-            .drain)))
+          .merge(input.through(socket.writes).onFinalize(socket.endOfOutput).drain)))
         .attempt
       _ <- setS(connected.closed)
     yield
