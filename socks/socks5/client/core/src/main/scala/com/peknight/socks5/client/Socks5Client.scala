@@ -19,8 +19,7 @@ trait Socks5Client[F[_], Auth, ConnectState, BindState, UDPAssociateState](using
   def connect: Resource[F, Socket[F]]
   def resource: Resource[F, Stream[F, Nothing]] =
     connect.map(socket => ClientPullState(api)
-      .run((Initial(Connection(socket.address, socket.peerAddress, socket.endOfInput, socket.endOfOutput)),
-        socket.reads))
+      .run((Initial(Connection(socket)), socket.reads))
       .as(())
       .stream
       .through(socket.writes)

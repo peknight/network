@@ -43,11 +43,12 @@ trait PullStateDsl[F[_]] extends BytePullStateErrorDsl[F, State[F], Terminated[F
       connected <- typedS[Connected[F, Auth, ConnectState]]
       _ <- pipe(input => Stream
         .resource[F, Socket[F]](tunnel(connected))
-        .flatMap(socket => socket.reads
-          .onFinalize(connected.connection.endOfOutput)
-          .merge(input.onFinalize(connected.connection.endOfInput)
-            .through(socket.writes).onFinalize(socket.endOfOutput)
-            .drain)))
+        .flatMap(socket =>
+          // tunnel -> 对端：写入与半关闭 FIN 在同一条线性链上（写尽后再 FIN），避免 FIN 抢先于数据
+          connected.connection.relayWrites(socket.reads)
+            .merge(input.onFinalize(connected.connection.endOfInput)
+              .through(socket.writes).onFinalize(socket.endOfOutput)
+              .drain)))
         .attempt
       _ <- setS(connected.closed)
     yield
